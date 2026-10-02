@@ -1,0 +1,216 @@
+{
+  "users": {
+    "agri-usr-94812": {
+      "_id": "agri-usr-94812",
+      "name": "sunny",
+      "mobile": "+917093297758",
+      "mobileVerified": true,
+      "updatedAt": "2026-09-29T08:06:04.657Z"
+    },
+    "farmer-c5d5ca51eded6d779fbdfeff": {
+      "_id": "farmer-c5d5ca51eded6d779fbdfeff",
+      "name": "Test",
+      "mobile": "+915550001212",
+      "mobileVerified": true,
+      "updatedAt": "2026-09-28T03:38:45.643Z"
+    },
+    "farmer-d04d9698ea95b09d41f5a106": {
+      "_id": "farmer-d04d9698ea95b09d41f5a106",
+      "name": "sunny",
+      "mobile": "+917093297758",
+      "mobileVerified": true,
+      "updatedAt": "2026-09-28T04:01:46.608Z"
+    },
+    "farmer-f3a47ce5ce3d4ca8ad15225a": {
+      "_id": "farmer-f3a47ce5ce3d4ca8ad15225a",
+      "name": "sunny",
+      "mobile": "+917093297758",
+      "mobileVerified": true,
+      "updatedAt": "2026-09-29T09:05:34.117Z"
+    }
+  },
+  "farms": {
+    "farm-agri-usr-94812": {
+      "_id": "farm-agri-usr-94812",
+      "userId": "agri-usr-94812",
+      "deviceId": null,
+      "farmLocation": {
+        "latitude": 18.1739,
+        "longitude": 79.525088
+      },
+      "farmBoundary": [
+        {
+          "lat": 18.171601,
+          "lng": 79.523595
+        },
+        {
+          "lat": 18.171698,
+          "lng": 79.522639
+        },
+        {
+          "lat": 18.172674,
+          "lng": 79.522672
+        },
+        {
+          "lat": 18.172608,
+          "lng": 79.52368
+        }
+      ],
+      "area": {
+        "acres": "2.84",
+        "hectares": "1.1495",
+        "sqMeters": 11495,
+        "perimeterMeters": 429,
+        "lengthMeters": 119,
+        "widthMeters": 110
+      },
+      "cropDetails": {
+        "name": "rice",
+        "variety": "hybrid",
+        "stage": null,
+        "plantingDate": "2026-11-21",
+        "harvestDate": null
+      },
+      "soilDetails": {
+        "type": "brown soil"
+      },
+      "waterSource": "farm pond",
+      "updatedAt": "2026-09-29T01:48:48.371Z"
+    },
+    "farm-farmer-c5d5ca51eded6d779fbdfeff": {
+      "_id": "farm-farmer-c5d5ca51eded6d779fbdfeff",
+      "userId": "farmer-c5d5ca51eded6d779fbdfeff",
+      "farmLocation": {
+        "latitude": 17,
+        "longitude": 79
+      },
+      "farmBoundary": [
+        {
+          "lat": 17,
+          "lng": 79
+        },
+        {
+          "lat": 17,
+          "lng": 79.001
+        },
+        {
+          "lat": 17.001,
+          "lng": 79.001
+        },
+        {
+          "lat": 17.001,
+          "lng": 79
+        }
+      ],
+      "area": {
+        "acres": "2.92",
+        "hectares": "1.1824",
+        "sqMeters": 11824,
+        "perimeterMeters": 435,
+        "lengthMeters": 111,
+        "widthMeters": 106
+      },
+      "cropDetails": null,
+      "soilDetails": null,
+      "waterSource": null,
+      "updatedAt": "2026-09-28T03:38:45.643Z"
+    },
+    "farm-farmer-d04d9698ea95b09d41f5a106": {
+      "_id": "farm-farmer-d04d9698ea95b09d41f5a106",
+      "userId": "farmer-d04d9698ea95b09d41f5a106",
+      "farmLocation": {
+        "latitude": 18.199263,
+        "longitude": 79.559217
+      },
+      "farmBoundary": [
+        {
+          "lat": 18.211657,
+          "lng": 79.560695
+        },
+        {
+          "lat": 18.211662,
+          "lng": 79.561571
+        },
+        {
+          "lat": 18.210261,
+          "lng": 79.5612
+        },
+        {
+          "lat": 18.210332,
+          "lng": 79.560712
+        },
+        {
+          "lat": 18.211112,
+          "lng": 79.560432
+        }
+      ],
+      "area": {
+        "acres": "3.23",
+        "hectares": "1.3087",
+        "sqMeters": 13087,
+        "perimeterMeters": 464,
+        "lengthMeters": 156,
+        "widthMeters": 120
+      },
+      "cropDetails": {
+        "name": "rice",
+        "variety": null,
+        "stage": null,
+        "plantingDate": null,
+        "harvestDate": null
+      },
+      "soilDetails": {
+        "type": "brown"
+      },
+      "waterSource": null,
+      "updatedAt": "2026-09-28T04:01:46.608Z"
+    },
+    "farm-farmer-f3a47ce5ce3d4ca8ad15225a": {
+      "_id": "farm-farmer-f3a47ce5ce3d4ca8ad15225a",
+      "userId": "farmer-f3a47ce5ce3d4ca8ad15225a",
+      "deviceId": null,
+      "farmLocation": {
+        "latitude": 18.199263,
+        "longitude": 79.559217
+      },
+      "farmBoundary": [
+        {
+          "lat": 18.211633,
+          "lng": 79.561481
+        },
+        {
+          "lat": 18.211358,
+          "lng": 79.562286
+        },
+        {
+          "lat": 18.210033,
+          "lng": 79.561943
+        },
+        {
+          "lat": 18.210298,
+          "lng": 79.560709
+        }
+      ],
+      "area": {
+        "acres": "4.37",
+        "hectares": "1.7693",
+        "sqMeters": 17693,
+        "perimeterMeters": 545,
+        "lengthMeters": 178,
+        "widthMeters": 167
+      },
+      "cropDetails": {
+        "name": "rice",
+        "variety": "hybrid",
+        "stage": "flowering",
+        "plantingDate": null,
+        "harvestDate": null
+      },
+      "soilDetails": {
+        "type": "brown"
+      },
+      "waterSource": "Borewell",
+      "updatedAt": "2026-09-29T09:05:34.117Z"
+    }
+  }
+}

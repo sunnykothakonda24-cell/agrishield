@@ -1,0 +1,901 @@
+:root {
+  color-scheme: light;
+  --background: #f3f7f4;
+  --background-secondary: #eaf0ec;
+  --surface: #ffffff;
+  --surface-secondary: #f7faf8;
+  --surface-elevated: #ffffff;
+  --surface-hover: #edf5f0;
+  --surface-active: #e1eee6;
+  --text-primary: #1c2922;
+  --text-secondary: #526158;
+  --text-muted: #718078;
+  --text-inverse: #f5faf7;
+  --border: #dfe7e1;
+  --border-strong: #c4d1c8;
+  --primary: #16845b;
+  --primary-hover: #116b49;
+  --primary-soft: rgba(22, 132, 91, 0.12);
+  --success: #16845b;
+  --success-soft: #e8f5ed;
+  --warning: #a66d11;
+  --warning-soft: #fff5dd;
+  --danger: #c83e36;
+  --danger-soft: #fff0ee;
+  --input-background: #ffffff;
+  --overlay: rgba(14, 24, 19, 0.58);
+  --shadow-sm: 0 2px 8px rgba(26, 48, 35, 0.06);
+  --shadow-md: 0 8px 24px rgba(26, 48, 35, 0.09);
+  --shadow-lg: 0 18px 48px rgba(12, 27, 18, 0.2);
+}
+
+:root[data-appearance="dark"] {
+  color-scheme: dark;
+  --background: #121a16;
+  --background-secondary: #17221c;
+  --surface: #19251e;
+  --surface-secondary: #1d2a23;
+  --surface-elevated: #223129;
+  --surface-hover: #2a3b31;
+  --surface-active: #31473a;
+  --text-primary: #e8f0eb;
+  --text-secondary: #c0cdc4;
+  --text-muted: #9aaba0;
+  --text-inverse: #101a14;
+  --border: #35463b;
+  --border-strong: #4c6052;
+  --primary: #32a874;
+  --primary-hover: #3fbd85;
+  --primary-soft: rgba(50, 168, 116, 0.17);
+  --success: #5cc994;
+  --success-soft: rgba(58, 154, 103, 0.18);
+  --warning: #edbd64;
+  --warning-soft: rgba(166, 109, 17, 0.2);
+  --danger: #f07a72;
+  --danger-soft: rgba(200, 62, 54, 0.19);
+  --input-background: #141f19;
+  --overlay: rgba(4, 10, 7, 0.76);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--background);
+}
+
+body {
+  color: var(--text-primary);
+}
+
+.agrishield-app-root {
+  color: var(--text-primary);
+  background: var(--background);
+}
+
+.agri-top-navbar {
+  color: var(--text-inverse);
+  background: #14231c;
+  border-color: rgba(218, 236, 225, 0.12);
+  box-shadow: var(--shadow-md);
+}
+
+.agri-top-navbar .brand-title-text,
+.agri-top-navbar .profile-name-text {
+  color: #f3f8f4;
+}
+
+.agri-top-navbar .brand-subline {
+  color: #a6b7ac;
+}
+
+.agri-top-navbar .btn-top-icon,
+.agri-top-navbar .dashboard-weather-entry,
+.agri-top-navbar .btn-top-profile {
+  color: #d9e6dd;
+  border-color: rgba(219, 235, 224, 0.16);
+  background: #203329;
+}
+
+.agri-top-navbar .btn-top-icon:hover,
+.agri-top-navbar .dashboard-weather-entry:hover,
+.agri-top-navbar .btn-top-profile:hover {
+  color: #ffffff;
+  border-color: rgba(91, 196, 142, 0.5);
+  background: #294235;
+}
+
+.agri-top-navbar .profile-badge-pill {
+  color: #74d7a4;
+}
+
+.agri-top-navbar .btn-top-logout {
+  color: #bdc9c1;
+}
+
+.agri-top-navbar .btn-top-logout:hover {
+  color: #ff8980;
+}
+
+.settings-permission-row {
+  gap: 9px;
+}
+
+.settings-permission-action {
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--primary);
+  background: var(--surface-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.settings-permission-action:hover {
+  color: var(--primary-hover);
+  background: var(--surface-hover);
+}
+
+.settings-option-row[aria-pressed="true"] {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.settings-option-row > svg:first-child {
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+
+.settings-dialog {
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-lg);
+}
+
+:root[data-appearance="dark"] .settings-dialog-backdrop {
+  background: var(--overlay);
+}
+
+:root[data-appearance="dark"] .settings-dialog :is(h2, p, label, span, small) {
+  color: var(--text-primary);
+}
+
+:root[data-appearance="dark"] .settings-dialog :is(.settings-dialog-error, .settings-otp-label input) {
+  border-color: var(--border);
+}
+
+:root[data-appearance="dark"] body,
+:root[data-appearance="dark"] .agrishield-app-root,
+:root[data-appearance="dark"] .agri-dashboard-layout,
+:root[data-appearance="dark"] .home-farm-dashboard,
+:root[data-appearance="dark"] .agri-main-viewport,
+:root[data-appearance="dark"] .tab-pane-container {
+  color: var(--text-primary);
+  background: var(--background);
+}
+
+:root[data-appearance="dark"] .agri-dashboard-layout.dynamic-env-normal,
+:root[data-appearance="dark"] .agri-dashboard-layout.dynamic-env-rain,
+:root[data-appearance="dark"] .agri-dashboard-layout.dynamic-env-sunny,
+:root[data-appearance="dark"] .agri-dashboard-layout.dynamic-env-dry_soil,
+:root[data-appearance="dark"] .agri-dashboard-layout.dynamic-env-high_heat,
+:root[data-appearance="dark"] .agri-dashboard-layout.dynamic-env-high_humidity,
+:root[data-appearance="dark"] .agri-dashboard-layout.dynamic-env-low_light {
+  background: var(--background);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .auth-container,
+  .agrishield-conversation-screen,
+  .ai-chat-header,
+  .ai-chat-input-footer,
+  .input-form-inner,
+  .structured-block,
+  .ai-card-subsections,
+  .dashboard-3d-section,
+  .dashboard-subcard,
+  .farm-header-welcome,
+  .visual-farm-centerpiece-card,
+  .farm-condition-status-bar,
+  .full-twin-canvas-card,
+  .farmtwin-header-bar,
+  .farmtwin-details-grid > *,
+  .twin-detail-card,
+  .empty-farm-setup-card,
+  .crop-schedule,
+  .crop-activity-row,
+  .crop-schedule-empty,
+  .shop-product-card,
+  .shop-product-detail,
+  .shop-search-form,
+  .shop-empty-state,
+  .alerts-full-page,
+  .alerts-status-card,
+  .alerts-farm-context,
+  .alerts-items-feed,
+  .alerts-notification-card,
+  .alerts-empty-state,
+  .alerts-request-error,
+  .settings-group,
+  .settings-dialog,
+  .settings-option-row,
+  .shop-category-filter button:not(.shop-clear-context),
+  .settings-row-icon,
+  .settings-section-icon,
+  .help-category-card,
+  .help-detail-panel,
+  .help-card-section,
+  .help-search-faqs,
+  .help-feature-row,
+  .help-faq-item,
+  .help-permission-row,
+  .help-about-grid article,
+  .help-contact-grid article,
+  .help-flow-step,
+  .help-security-panel,
+  .help-form,
+  .weather-rain-map-card,
+  .weather-header-box,
+  .weather-card,
+  .weather-current-panel,
+  .weather-hourly-card,
+  .weather-sample-card,
+  .weather-timeline,
+  .weather-layer-selector button,
+  .review-summary-card,
+  .review-map-preview,
+  .farm-step-card,
+  .stepper-track
+) {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background-color: var(--surface-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .settings-center,
+  .alerts-tab-pane,
+  .ai-chat-body,
+  .ai-chat-messages-container,
+  .ai-chat-input-footer,
+  .weather-view-container,
+  .help-support-page,
+  .crop-schedule-content,
+  .shop-view,
+  .farmtwin-title-col,
+  .farm-step-content,
+  .flow-content-area
+) {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background-color: var(--background);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .settings-center h2,
+  .settings-center h3,
+  .settings-center p,
+  .settings-center strong,
+  .settings-center small,
+  .settings-center span,
+  .alerts-full-page h2,
+  .alerts-full-page h3,
+  .alerts-full-page h4,
+  .alerts-full-page p,
+  .alerts-full-page span,
+  .alerts-full-page strong,
+  .crop-schedule h2,
+  .crop-schedule h3,
+  .crop-schedule p,
+  .crop-schedule strong,
+  .crop-schedule span,
+  .shop-view h2,
+  .shop-view h3,
+  .shop-view h4,
+  .shop-view p,
+  .shop-view span,
+  .help-support-page h2,
+  .help-support-page h3,
+  .help-support-page h4,
+  .help-support-page p,
+  .help-support-page span,
+  .weather-view-container h2,
+  .weather-view-container h3,
+  .weather-view-container h4,
+  .weather-view-container p,
+  .weather-view-container span,
+  .farmtwin-header-bar h3,
+  .farmtwin-details-grid h4,
+  .twin-detail-card p,
+  .empty-farm-setup-card h3,
+  .empty-farm-setup-card p,
+  .greeting-main,
+  .greeting-sub,
+  .condition-status-sentence
+) {
+  color: var(--text-primary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .settings-row-copy > span,
+  .settings-row-value,
+  .settings-permission-note,
+  .crop-activity-copy > span,
+  .shop-header p,
+  .shop-brand,
+  .shop-price-updated,
+  .help-lead,
+  .help-page-heading p,
+  .weather-header-box p,
+  .weather-card p,
+  .weather-data-timestamp,
+  .farmtwin-title-col .subtext,
+  .detail-sub,
+  .empty-farm-setup-card p,
+  .brand-subline
+) {
+  color: var(--text-muted);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select,
+  .farmer-text-input,
+  .settings-otp-label input,
+  .shop-search-form input,
+  .help-search-box input,
+  .help-form input,
+  .help-form select,
+  .help-form textarea
+) {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background-color: var(--input-background);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(input, textarea, select)::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .auth-container,
+  .ai-chat-header,
+  .header-farmer-badge,
+  .welcome-prompt-card,
+  .farmer-quick-actions-bar,
+  .btn-quick-farmer-action,
+  .btn-language-selector,
+  .ai-header-weather-button,
+  .btn-input-accessory,
+  .btn-new-chat,
+  .btn-expand-twin,
+  .settings-dialog,
+  .settings-option-row,
+  .language-dropdown-menu,
+  .language-dropdown-menu button,
+  .help-search-box,
+  .help-back-button,
+  .help-secondary-button,
+  .settings-secondary-button,
+  .settings-picker-close,
+  .shop-pagination button,
+  .crop-not-yet-action,
+  .crop-shop-action,
+  .crop-upcoming-timeline button,
+  .alerts-filter-chip,
+  .alerts-empty-state button,
+  .alerts-mark-read,
+  .weather-layer-selector button,
+  .weather-refresh-button,
+  .weather-timeline-controls button,
+  .review-edit-button,
+  .water-step-actions .btn-secondary-action
+) {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background-color: var(--surface-secondary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  button.settings-row:hover:not(:disabled),
+  .settings-option-row:hover,
+  .alerts-filter-chip:hover,
+  .weather-layer-selector button:hover,
+  .help-category-card:hover,
+  .help-back-button:hover,
+  .help-secondary-button:hover,
+  .shop-pagination button:hover:not(:disabled),
+  .crop-shop-action:hover,
+  .crop-not-yet-action:hover
+) {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background-color: var(--surface-hover);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .bottom-nav-item,
+  .ai-brand-icon,
+  .welcome-avatar-large,
+  .shop-header-icon,
+  .crop-schedule-icon,
+  .weather-condition-pill,
+  .weather-heading-icon,
+  .weather-source-status,
+  .crop-schedule-advisory,
+  .shop-category-label,
+  .review-category-value,
+  .help-heading-icon,
+  .help-card-icon,
+  .help-permission-icon,
+  .settings-row-icon
+) {
+  color: var(--primary-hover);
+  border-color: var(--border);
+  background-color: var(--primary-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .weather-source-status span {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background-color: var(--surface-secondary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .shop-category-filter button.selected {
+  color: var(--primary-hover);
+  border-color: var(--primary);
+  background-color: var(--primary-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .shop-category-filter .shop-clear-context {
+  color: var(--primary-hover);
+  border-color: transparent;
+  background-color: transparent;
+}
+
+:root[data-appearance="dark"] .agri-bottom-navbar {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+:root[data-appearance="dark"] .bottom-nav-item {
+  color: var(--text-muted);
+}
+
+:root[data-appearance="dark"] .bottom-nav-item.active {
+  color: var(--primary-hover);
+}
+
+:root[data-appearance="dark"] .settings-dialog-backdrop {
+  background: var(--overlay);
+}
+
+:root[data-appearance="dark"] .leaflet-container {
+  background: #17231c;
+}
+
+:root[data-appearance="dark"] .leaflet-control,
+:root[data-appearance="dark"] .leaflet-popup-content-wrapper,
+:root[data-appearance="dark"] .leaflet-popup-tip {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background: var(--surface-elevated);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .weather-map-shell .leaflet-bar a,
+  .weather-map-shell .leaflet-control-attribution,
+  .farm-map-viewport .leaflet-bar a,
+  .farm-map-viewport .leaflet-control-attribution,
+  .weather-map-reset
+) {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background-color: var(--surface-elevated);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .message-bubble.farmer,
+  .btn-primary,
+  .btn-primary-action,
+  .btn-setup-farm-action,
+  .settings-primary-button,
+  .shop-search-form button,
+  .shop-view-product,
+  .help-primary-button,
+  .crop-done-action,
+  .alerts-request-error button
+) {
+  color: #f7fbf8;
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.agrishield-app-root :is(button, a, input, textarea, select):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.agrishield-app-root button:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(.settings-dialog-error, .help-form-error, .alerts-inline-error) {
+  color: #ffd2cc;
+  border-color: rgba(240, 122, 114, 0.38);
+  background: var(--danger-soft);
+}
+
+@media (max-width: 640px) {
+  .agri-top-navbar {
+    padding-inline: 12px;
+  }
+
+  .agri-top-navbar .brand-subline {
+    display: none;
+  }
+
+  .agri-top-navbar .top-user-controls {
+    gap: 6px;
+  }
+
+  .agri-top-navbar .dashboard-weather-entry span,
+  .agri-top-navbar .profile-badge-pill {
+    display: none;
+  }
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .flow-card,
+  .premium-card,
+  .location-selected-card,
+  .search-results-dropdown,
+  .search-result-item,
+  .map-floating-search-bar,
+  .search-input-wrapper,
+  .map-floating-gps,
+  .boundary-map-toolbar,
+  .coords-readout-box,
+  .modal-dialog-box,
+  .ai-modal-card,
+  .voice-recording-modal,
+  .ai-empty-chat-welcome,
+  .ai-thinking-card,
+  .ai-card-subsections,
+  .message-bubble.ai,
+  .message-bubble.error-bubble,
+  .weather-empty-state,
+  .weather-phase1-notice,
+  .weather-action-card,
+  .weather-forecast-row,
+  .shop-loading,
+  .shop-retry,
+  .crop-schedule-loading,
+  .crop-schedule-error,
+  .help-inline-state,
+  .help-loading-state,
+  .help-empty-state,
+  .location-feedback,
+  .boundary-validation-hint
+) {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background-color: var(--surface-elevated);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .agri-header,
+  .flow-page-shell,
+  .wizard-header,
+  .stepper-container,
+  .farm-step-card,
+  .flow-content-area
+) {
+  color: var(--text-primary);
+  background-color: var(--background);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .agri-header {
+  border-color: var(--border);
+  background-color: var(--surface);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .node-circle {
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
+  background-color: var(--surface-secondary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .stepper-node.current .node-circle {
+  color: var(--text-inverse);
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .stepper-node.completed .node-circle {
+  color: var(--primary-hover);
+  border-color: var(--primary);
+  background-color: var(--primary-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .stepper-node .node-label {
+  color: var(--text-muted);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .stepper-node:is(.current, .completed) .node-label {
+  color: var(--primary-hover);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .step-title,
+  .step-subtitle,
+  .location-heading-box h2,
+  .location-heading-box p,
+  .coord-label,
+  .coord-value,
+  .search-result-title,
+  .search-result-item,
+  .boundary-point-count,
+  .wizard-header .header-logo-text,
+  .wizard-header .name-bold,
+  .wizard-header .mobile-small,
+  .ai-brand-heading,
+  .ai-brand-sub,
+  .welcome-title,
+  .welcome-sub,
+  .live-engine-tag,
+  .header-farmer-badge,
+  .btn-language-selector,
+  .btn-new-chat,
+  .ai-header-weather-button,
+  .btn-input-accessory,
+  .input-form-inner,
+  .structured-block,
+  .ai-chat-input-status,
+  .ai-empty-chat-welcome,
+  .ai-thinking-card,
+  .message-bubble.ai,
+  .ai-response-meta-header,
+  .ai-category-pill,
+  .message-timestamp,
+  .weather-empty-state,
+  .weather-data-timestamp,
+  .weather-source-status,
+  .weather-phase1-notice,
+  .weather-action-card,
+  .weather-forecast-row,
+  .shop-error,
+  .shop-loading,
+  .crop-schedule-loading,
+  .crop-schedule-error,
+  .help-inline-state,
+  .help-loading-state,
+  .help-empty-state,
+  .location-feedback,
+  .boundary-validation-hint
+) {
+  color: var(--text-primary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .ai-brand-icon,
+  .welcome-avatar-large,
+  .ai-avatar,
+  .farmer-avatar
+) {
+  color: var(--primary-hover);
+  border-color: var(--border);
+  background-color: var(--primary-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .ai-brand-sub,
+  .welcome-sub,
+  .farmer-crop,
+  .message-markdown-text .bullet-line,
+  .action-list li
+) {
+  color: var(--text-secondary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .live-engine-tag {
+  color: var(--primary-hover);
+  border-color: var(--border);
+  background-color: var(--primary-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .ai-header-weather-button,
+  .btn-new-chat,
+  .btn-language-selector,
+  .header-farmer-badge,
+  .welcome-prompt-card,
+  .farmer-quick-actions-bar,
+  .btn-quick-farmer-action,
+  .btn-input-accessory
+) {
+  color: var(--text-primary);
+  border-color: var(--border);
+  background-color: var(--surface-secondary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .btn-new-chat:hover,
+  .btn-language-selector:hover,
+  .ai-header-weather-button:hover,
+  .btn-input-accessory:hover:not(:disabled),
+  .btn-quick-farmer-action:hover:not(:disabled)
+) {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background-color: var(--surface-hover);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .ai-chat-input-status.error,
+  .ai-modal-error
+) {
+  color: var(--danger);
+  border-color: rgba(240, 122, 114, 0.38);
+  background-color: var(--danger-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .map-search-input,
+  .search-results-dropdown,
+  .language-dropdown-menu,
+  .language-dropdown-menu button,
+  .modal-dialog-box,
+  .ai-modal-card,
+  .voice-recording-modal,
+  .farm-map-viewport .leaflet-control,
+  .boundary-map-toolbar,
+  .map-floating-gps,
+  .btn-clear-search,
+  .toolbar-btn,
+  .btn-secondary-action
+) {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background-color: var(--surface-elevated);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .wizard-header .header-subtag,
+  .search-result-item .result-title,
+  .search-result-item .result-subtitle,
+  .location-heading-box .step-subtitle,
+  .weather-empty-state,
+  .weather-source-status,
+  .weather-data-timestamp,
+  .shop-price-updated,
+  .crop-schedule-footnote
+) {
+  color: var(--text-muted);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .alerts-status-card.critical,
+  .alerts-notification-card.severity-emergency,
+  .alerts-notification-card.severity-critical,
+  .location-feedback[role="alert"],
+  .crop-schedule-error,
+  .weather-empty-state.error
+) {
+  border-color: rgba(240, 122, 114, 0.38);
+  background-color: var(--danger-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .alerts-status-card.advisory,
+  .alerts-notification-card.severity-advisory,
+  .alerts-notification-card.severity-important,
+  .boundary-validation-hint
+) {
+  border-color: rgba(237, 189, 100, 0.38);
+  background-color: var(--warning-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root :is(
+  .alerts-title-icon,
+  .alerts-context-icon,
+  .alerts-status-icon,
+  .alerts-empty-icon,
+  .alerts-notification-icon
+) {
+  color: var(--primary-hover);
+  border-color: var(--border);
+  background-color: var(--primary-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .alerts-status-pill {
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  background-color: var(--surface-secondary);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .alerts-loading-list > div {
+  border-color: var(--border);
+  background: linear-gradient(90deg, var(--surface) 20%, var(--surface-secondary) 40%, var(--surface) 60%);
+  background-size: 220% 100%;
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .alerts-status-card.critical .alerts-status-icon,
+:root[data-appearance="dark"] .agrishield-app-root .alerts-notification-card:is(.severity-emergency, .severity-critical) .alerts-notification-icon {
+  color: var(--danger);
+  border-color: rgba(240, 122, 114, 0.38);
+  background-color: var(--danger-soft);
+}
+
+:root[data-appearance="dark"] .agrishield-app-root .alerts-status-card.advisory .alerts-status-icon,
+:root[data-appearance="dark"] .agrishield-app-root .alerts-notification-card:is(.severity-advisory, .severity-important) .alerts-notification-icon {
+  color: var(--warning);
+  border-color: rgba(237, 189, 100, 0.38);
+  background-color: var(--warning-soft);
+}
+
+.settings-permission-row .settings-row-value {
+  max-width: 27%;
+}
+
+@media (max-width: 560px) {
+  .ai-chat-header .header-left {
+    min-width: 0;
+  }
+
+  .ai-chat-header .header-right {
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .ai-chat-header .btn-new-chat,
+  .ai-chat-header .btn-language-selector {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    padding: 0;
+  }
+
+  .ai-chat-header .btn-new-chat span,
+  .ai-chat-header .btn-language-selector .lang-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .ai-chat-header .btn-language-selector > svg:last-child {
+    display: none;
+  }
+
+  .settings-permission-row {
+    flex-wrap: wrap;
+    padding-block: 12px;
+  }
+
+  .settings-permission-row .settings-row-copy {
+    flex: 1 1 calc(100% - 52px);
+  }
+
+  .settings-permission-row .settings-row-value {
+    max-width: 44%;
+    margin-left: 48px;
+    text-align: left;
+  }
+}
