@@ -44,12 +44,18 @@ const isProduction = process.env.NODE_ENV === 'production';
 if (isProduction && getAIConfig().provider !== 'gemini') {
   throw new Error('AI_PROVIDER must be gemini in production.');
 }
+const defaultOrigins = isProduction
+  ? ['https://agrishield-gamma.vercel.app']
+  : ['https://agrishield-gamma.vercel.app', 'http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'];
 const configuredCorsOrigins = process.env.CORS_ALLOWED_ORIGINS ||
   (!isProduction ? process.env.FRONTEND_ORIGINS || 'http://localhost:5173,http://localhost:3000' : '');
-const allowedOrigins = configuredCorsOrigins
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = Array.from(new Set([
+  ...defaultOrigins,
+  ...configuredCorsOrigins
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+]));
 if (isProduction) {
   if (allowedOrigins.length === 0) {
     throw new Error('CORS_ALLOWED_ORIGINS must contain the HTTPS deployment origin in production.');
@@ -69,7 +75,8 @@ if (isProduction) {
 }
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    const normalized = origin ? origin.trim().replace(/\/+$/, '') : '';
+    if (!origin || allowedOrigins.includes(normalized) || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     return callback(new Error('Origin is not allowed by the AgriShield API.'));
@@ -299,18 +306,19 @@ app.get('/api/geocode', async (req, res) => {
 app.post('/api/auth/bootstrap', requireFirebaseIdentity, async (req, res) => {
   try {
     if (process.env.NODE_ENV === 'development') {
-      console.info('[AgriShield Account Sync] Starting UID-backed Firestore synchronization.');
+      console.info(`[AgriShield Account Sync] Starting UID-backed Firestore synchronization. uid=${req.firebaseUid}`);
     }
     const farmer = await syncFirebaseAccount(req.firebaseUser, req.body?.farmerName);
     const profile = await getFarmerProfile(farmer._id);
     if (!profile) {
+      console.warn(`[AgriShield Account Sync] Profile missing after sync. uid=${req.firebaseUid}`);
       return res.status(503).json({
         success: false,
         message: 'The Firebase account is verified, but its AgriShield farmer profile could not be loaded.'
       });
     }
     if (process.env.NODE_ENV === 'development') {
-      console.info('[AgriShield Account Sync] Private identity and available owned farms loaded.');
+      console.info(`[AgriShield Account Sync] Account synchronized successfully. uid=${req.firebaseUid}, farmerId=${farmer._id}`);
     }
     return res.json({
       success: true,
@@ -319,7 +327,11 @@ app.post('/api/auth/bootstrap', requireFirebaseIdentity, async (req, res) => {
       data: profile
     });
   } catch (error) {
-    console.error('[AgriShield Auth] Account synchronization failed:', error.code || error.name || 'sync_error');
+    console.error('[AgriShield Auth] Account synchronization failed:', {
+      uid: req.firebaseUid,
+      code: error.code || error.name || 'sync_error',
+      message: error.message
+    });
     const status = error.statusCode || 503;
     return res.status(error.statusCode || 503).json({
       success: false,

@@ -227,7 +227,13 @@ function App() {
         ? 'Firebase sign-in is not configured'
         : isFirebaseAuthError
           ? 'Firebase sign-in needs attention'
-          : 'Could not load your farm data';
+          : sessionErrorCode === 'FARM_ACCESS_DENIED'
+            ? 'Account access denied'
+            : sessionErrorCode === 'RESOURCE_NOT_FOUND'
+              ? 'Service endpoint not found'
+              : sessionErrorCode === 'BACKEND_SERVICE_ERROR'
+                ? 'Server error loading farm data'
+                : 'Could not load your farm data';
 
   return (
     <div className="agrishield-app-root">

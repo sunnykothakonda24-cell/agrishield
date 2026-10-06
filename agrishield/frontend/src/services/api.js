@@ -7,7 +7,8 @@ import {
   toSpeechLanguageCode
 } from './aiMedia';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+const DEFAULT_PRODUCTION_API_BASE = 'https://agrishield-8mbp.onrender.com/api';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? DEFAULT_PRODUCTION_API_BASE : '')).trim().replace(/\/+$/, '');
 let activeFarmId = null;
 
 function validateApiBase() {
@@ -87,13 +88,41 @@ export const getCurrentSession = async (farmerName = '') => {
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.success || !data.data) {
-    const error = new Error(data.message || 'Your AgriShield account could not be synchronized.');
+    let errorCode = data.code;
+    let errorMessage = data.message;
+    if (!errorCode) {
+      if (response.status === 401) {
+        errorCode = 'FIREBASE_AUTH_FAILED';
+      } else if (response.status === 403) {
+        errorCode = 'FARM_ACCESS_DENIED';
+      } else if (response.status === 404) {
+        errorCode = 'RESOURCE_NOT_FOUND';
+      } else if (response.status === 503) {
+        errorCode = 'FARM_DATA_UNAVAILABLE';
+      } else if (response.status >= 500) {
+        errorCode = 'BACKEND_SERVICE_ERROR';
+      } else {
+        errorCode = 'ACCOUNT_SYNC_FAILED';
+      }
+    }
+    if (!errorMessage) {
+      if (response.status === 401) {
+        errorMessage = 'Your authentication session could not be verified. Please sign in again.';
+      } else if (response.status === 403) {
+        errorMessage = 'You do not have permission to access this account or farm data.';
+      } else if (response.status === 404) {
+        errorMessage = 'The requested account service endpoint was not found.';
+      } else if (response.status === 503) {
+        errorMessage = 'Farm data service is temporarily unavailable. Please retry shortly.';
+      } else if (response.status >= 500) {
+        errorMessage = 'A server error occurred while loading farm data. Please retry.';
+      } else {
+        errorMessage = 'Your AgriShield account could not be synchronized.';
+      }
+    }
+    const error = new Error(errorMessage);
     error.status = response.status;
-    error.code = data.code || (response.status === 401 || response.status === 403
-      ? 'FIREBASE_AUTH_FAILED'
-      : response.status === 503
-        ? 'FARM_DATA_UNAVAILABLE'
-        : 'ACCOUNT_SYNC_FAILED');
+    error.code = errorCode;
     throw error;
   }
   setActiveFarmId(data.data.activeFarmId || data.data.farm?._id || null);
