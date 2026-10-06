@@ -1,4 +1,4 @@
-const LANGUAGE_CODES = new Set(['auto', 'en', 'te', 'hi']);
+const { resolveLanguage } = require('./languageRegistry');
 
 const ROMAN_TELUGU = /\b(?:eppudu|epudu|pettali|pettala|petala|pettal|petali|pettaala|neellu|neeru|pantaku|aakulu|pasupu|naaku|cheppandi|vasthunda|avuthundi)\b/i;
 const ROMAN_HINDI = /\b(?:paani|pani|fasal|khet|kheti|kab|chahiye|meri|mera|mere|mitti|sichai|sinchai|barish|baarish|kya|hai|kaise|karna|dena)\b/i;
@@ -7,7 +7,10 @@ const INTENT_PATTERNS = [
   ['IMAGE_ANALYSIS', /(?:image|photo|picture|photograph|ఫోటో|చిత్రం|चित्र|फोटो|तस्वीर)/i],
   ['ALERTS', /(?:alert|notification|warning|అలర్ట్|హెచ్చరిక|सूचना|चेतावनी)/i],
   ['FARM_TWIN', /(?:farm twin|digital twin|simulation|simulate|సిమ్యులేషన్|डिजिटल ट्विन)/i],
+  ['SCHEDULE', /(?:what should i do today|what do i need to do today|today.?s activity|today.?s task|upcoming farm activit|crop schedule|when should i apply|आज क्या करना|आज का काम|आज क्या करना चाहिए|ఈరోజు ఏం చేయాలి|ఈ రోజు ఏ పని|ఈరోజు పని|రేపు ఏం చేయాలి)/i],
   ['WEATHER', /(?:weather|forecast|rain|rainfall|temperature|hotter|precipitation|clouds?|wind|spray.*today|spray.*rain|irrigat.*rain|वातावरणం|వర్షం|వర్షపాతం|వాన|మేఘం|మబ్బులు|గాలి.*దిశ|స్ప్రే.*ఈరోజు|గత నెల.*(?:వేడి|ఉష్ణోగ్రత)|बारिश|मौसम|वर्षा|तापमान|गर्मी|बादल|हवा.*दिशा|छिड़काव.*आज|पिछले महीने.*(?:गर्म|तापमान))/i],
+  ['FARM_DETAILS', /(?:farm (?:name|size|area|acre|location)|how (?:many|big).*(?:acre|area|size|farm|field)|(?:how many|what is the).*(?:acre|area|size).*(?:farm|field)|(?:what|which) crop (?:did i add|am i growing|do i have)|(?:when did i plant|planting date|crop age|how old is my crop|water source|soil (?:type|did i enter))|పొలం (?:పేరు|విస్తీర్ణం)|ఎన్ని ఎకరాలు|పంట వయస్సు|నాటిన తేదీ|నీటి వనరు|నేల రకం|खेत का (?:नाम|आकार|क्षेत्र)|कितने एकड़|फसल की उम्र|बोने की तारीख|पानी का स्रोत|मिट्टी का प्रकार)/i],
+  ['FARM_SUMMARY', /(?:tell me about (?:my|the) farm|show (?:my|the) farm details|farm summary|farm details|about my farm|मेरे खेत के बारे में|मेरे खेत की जानकारी|నా పొలం వివరాలు|నా పొలం గురించి)/i],
   ['SOIL', /(?:soil| मिट्टी|మట్టి|నేల|భూసారం|soil type|మట్టిరకం|मिट्टी|मृदा)/i],
   ['MARKET', /(?:market|price|mandi|మార్కెట్|ధర|ధరలు|మండీ|बाजार|मंडी|भाव|कीमत)/i],
   ['GOVERNMENT_SCHEME', /(?:scheme|subsidy|government|yojana|పథకం|సబ్సిడీ|ప్రభుత్వం|योजना|सरकारी|सब्सिडी)/i],
@@ -20,7 +23,7 @@ const INTENT_PATTERNS = [
 ];
 
 function normalizeLanguage(language) {
-  return LANGUAGE_CODES.has(language) ? language : 'auto';
+  return resolveLanguage(language) || 'auto';
 }
 
 function detectLanguage(text = '', preferredLanguage = 'auto') {

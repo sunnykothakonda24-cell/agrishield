@@ -1,15 +1,23 @@
 const FIREBASE_AUTH_MESSAGES = {
-  'auth/invalid-phone-number': 'Enter a valid mobile number and try again.',
-  'auth/too-many-requests': 'Too many attempts were made. Wait a while before trying again.',
-  'auth/quota-exceeded': 'Phone verification is temporarily unavailable. Please try again later.',
-  'auth/code-expired': 'This verification code has expired. Request a new code.',
-  'auth/invalid-verification-code': 'That verification code is incorrect. Check it and try again.',
-  'auth/captcha-check-failed': 'The security check could not be verified. Please try again.',
-  'auth/invalid-app-credential': 'The security check could not be verified. Please try again.',
-  'auth/network-request-failed': 'A network error interrupted phone verification. Check your connection and try again.',
-  'auth/internal-error': 'Firebase could not complete phone verification. Wait a moment and try again.',
-  'auth/operation-not-allowed': 'Phone sign-in is not enabled for this Firebase project.',
-  'auth/unauthorized-domain': 'This app domain is not authorized for Firebase sign-in.'
+  'auth/invalid-credential': 'Incorrect email or password.',
+  'auth/user-not-found': 'Incorrect email or password.',
+  'auth/wrong-password': 'Incorrect email or password.',
+  'auth/email-already-in-use': 'An account already exists with this email.',
+  'auth/weak-password': 'Password is too weak. Use at least 8 characters.',
+  'auth/invalid-email': 'Please enter a valid email address.',
+  'auth/too-many-requests': 'Too many attempts. Please try again later.',
+  'auth/network-request-failed': 'A network error occurred. Check your connection and try again.',
+  'auth/user-disabled': 'This account has been disabled. Please contact support.',
+  'auth/operation-not-allowed': 'Email/password sign-in is not enabled for this Firebase project.',
+  'auth/missing-password': 'Please enter your password.',
+  'auth/missing-email': 'Please enter your email.'
+};
+
+const PASSWORD_RESET_MESSAGES = {
+  'auth/user-not-found': 'No account was found with this email.',
+  'auth/invalid-email': 'Please enter a valid email address.',
+  'auth/too-many-requests': 'Too many requests. Please try again later.',
+  'auth/missing-email': 'Please enter your email.'
 };
 
 export function logFirebaseAuthError(error, operation) {
@@ -24,10 +32,35 @@ export function logFirebaseAuthEvent(message) {
   }
 }
 
-export function getFirebaseAuthErrorMessage(error, fallback) {
+export function getFirebaseAuthErrorMessage(error, fallback = 'Authentication failed. Please try again.') {
   if (FIREBASE_AUTH_MESSAGES[error?.code]) return FIREBASE_AUTH_MESSAGES[error.code];
   if (typeof error?.code === 'string' && error.code.startsWith('auth/')) {
-    return 'Phone verification failed. Please try again.';
+    return 'Authentication failed. Please check your credentials and try again.';
   }
   return error?.message || fallback;
 }
+
+export function getPasswordResetErrorMessage(error, fallback = 'Unable to send password reset email. Please try again.') {
+  if (PASSWORD_RESET_MESSAGES[error?.code]) return PASSWORD_RESET_MESSAGES[error.code];
+  if (FIREBASE_AUTH_MESSAGES[error?.code]) return FIREBASE_AUTH_MESSAGES[error.code];
+  return error?.message || fallback;
+}
+
+export function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+export function validatePassword(password) {
+  if (!password || password.length < 8) {
+    return 'Password must contain at least 8 characters.';
+  }
+  return null;
+}
+
+export function validatePasswordMatch(password, confirmPassword) {
+  if (password !== confirmPassword) {
+    return 'Passwords do not match.';
+  }
+  return null;
+}
+

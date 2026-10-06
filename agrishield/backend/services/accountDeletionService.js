@@ -1,6 +1,7 @@
 const { getFirebaseAuth } = require('./firebaseAdmin');
 const firestoreRepository = require('./firestoreRepository');
 const localStorageService = require('./storage/localStorageService');
+const cloudinaryImageService = require('./cloudinaryImageService');
 
 function supportAttachmentFilename(value) {
   const match = /^\/uploads\/support\/([a-f0-9-]+\.(?:jpg|png|webp))$/i.exec(value);
@@ -21,15 +22,20 @@ async function removeSupportAttachments(paths) {
 
 async function deleteAccount(uid) {
   if (typeof uid !== 'string' || !uid) throw new Error('A verified Firebase UID is required.');
-  if (!firestoreRepository.isConfigured()) {
-    const error = new Error('Account data storage is unavailable. Please try again later.');
-    error.code = 'FIRESTORE_UNAVAILABLE';
+  if (!firestoreRepository.isConfigured() || !firestoreRepository.isPrivateConfigured()) {
+    const error = new Error('Private account storage and application data storage must both be available before account deletion.');
+    error.code = 'FIREBASE_PROJECT_STORAGE_UNAVAILABLE';
     error.statusCode = 503;
     throw error;
   }
 
   const plan = await firestoreRepository.getAccountDataDeletionPlan(uid);
   await removeSupportAttachments(plan.attachments);
+  try {
+    await cloudinaryImageService.deleteUserAssets(uid);
+  } catch (error) {
+    console.warn('[AgriShield Account Deletion] Cloudinary cleanup needs follow-up:', error.code || error.name || 'cleanup_error');
+  }
   const deletedDocuments = await firestoreRepository.deleteAccountData(plan);
   await getFirebaseAuth().deleteUser(uid);
   return { deletedDocuments };

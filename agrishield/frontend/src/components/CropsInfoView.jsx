@@ -1,9 +1,13 @@
 import React from 'react';
 import { BookOpen, CalendarDays, Droplet, Sprout } from 'lucide-react';
+import { translate } from '../i18n';
+import { useAppPreferences } from '../services/useAppPreferences';
 
 const NOT_AVAILABLE = 'Not available';
 
 export default function CropsInfoView({ profile, onSelectCropForChat }) {
+  const { language } = useAppPreferences();
+  const t = (key, values) => translate(language, key, values);
   const farm = profile?.farm || {};
   const crop = farm.cropDetails || {};
   const cropName = crop.name || farm.crop;
@@ -25,7 +29,7 @@ export default function CropsInfoView({ profile, onSelectCropForChat }) {
         <div className="header-title-box">
           <Sprout size={24} color="#10b981" />
           <div>
-            <h3>My Crops</h3>
+            <h3>{t('crops.title')}</h3>
             <p>Crop information saved to your farm profile</p>
           </div>
         </div>

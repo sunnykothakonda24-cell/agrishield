@@ -8,7 +8,8 @@ service cloud.firestore {
 
     match /notifications/{notificationId} {
       allow read: if request.auth != null &&
-        resource.data.userId == request.auth.uid;
+        (resource.data.ownerUid == request.auth.uid ||
+          resource.data.userId == request.auth.uid);
       allow write: if false;
     }
   }

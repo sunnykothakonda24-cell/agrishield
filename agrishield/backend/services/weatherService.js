@@ -1,4 +1,5 @@
 const openMeteoService = require('./openMeteoService');
+const { resolveFarmTimeZone } = require('./farmTimezoneService');
 
 function coordinatesFromLocation(location) {
   const latitude = Number(location?.latitude ?? location?.lat);
@@ -32,14 +33,20 @@ function noLocationResult() {
   };
 }
 
-async function getCurrentWeather(location, { forecastDays = 7, includeNearbyRain = false } = {}) {
+async function getCurrentWeather(location, { forecastDays = 7, includeNearbyRain = false, timeZone } = {}) {
   const coordinates = coordinatesFromLocation(location);
   if (!coordinates) return noLocationResult();
 
+  const timezone = resolveFarmTimeZone({
+    ...location,
+    ...coordinates,
+    timezone: location.timezone || location.timeZone || timeZone
+  });
   const weather = await openMeteoService.getForecast(
     coordinates.latitude,
     coordinates.longitude,
-    forecastDays
+    forecastDays,
+    timezone
   );
   if (!includeNearbyRain) return weather;
   return {

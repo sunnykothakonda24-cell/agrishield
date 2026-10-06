@@ -1,17 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  User, 
-  MapPin, 
-  Square, 
-  Sprout, 
-  CheckCircle2, 
-  Bell, 
-  Check, 
-  ArrowLeft,
-  Shield,
-  Droplet,
-  Layers
-} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { User, Check, Shield } from 'lucide-react';
 import ProfileCard from '../components/ProfileCard';
 import FarmLocation from '../components/FarmLocation';
 
@@ -48,22 +36,28 @@ export default function Profile({
   verifiedMobile = '', 
   initialProfile = {}, 
   onProfileComplete, 
-  onLogout 
+  createNewFarm = false
 }) {
+  const formFarm = createNewFarm ? null : initialProfile?.farm;
+  const savedFarmIdRef = useRef(formFarm?._id || null);
   // Start on step 1 ('name'). Only after entering name does location become available.
   const [currentStep, setCurrentStep] = useState('name');
   const [saving, setSaving] = useState(false);
   const [locationSaved, setLocationSaved] = useState(false);
   const [error, setError] = useState('');
-  const [loadingProfile, setLoadingProfile] = useState(false);
 
   // Form State — Starts EMPTY if not already saved (Requirements 1, 3)
   const [farmerName, setFarmerName] = useState(initialProfile?.farmerName || '');
   const [currentMobile, setCurrentMobile] = useState(verifiedMobile || initialProfile?.verifiedMobile || '');
   const [userId] = useState(initialProfile?.userId || null);
-  const [location, setLocation] = useState(initialProfile?.farm?.location || null);
+  const [location, setLocation] = useState(formFarm?.location
+    ? {
+        ...formFarm.location,
+        displayName: formFarm.location.displayName || formFarm.farmLocation?.displayName || null
+      }
+    : null);
 
-  const [boundaryData, setBoundaryData] = useState(initialProfile?.farm?.boundary || {
+  const [boundaryData, setBoundaryData] = useState(formFarm?.boundary || {
     points: [],
     areaAcres: '0.00',
     areaSqMeters: 0,
@@ -72,23 +66,23 @@ export default function Profile({
   });
 
   const [farmData, setFarmData] = useState({
-    crop: initialProfile?.farm?.crop || '',
-    variety: initialProfile?.farm?.variety || '',
-    stage: initialProfile?.farm?.stage || '',
-    plantingDate: initialProfile?.farm?.plantingDate || '',
-    harvestDate: initialProfile?.farm?.harvestDate || '',
-    soilType: initialProfile?.farm?.soilType || ''
+    crop: formFarm?.crop || '',
+    variety: formFarm?.variety || '',
+    stage: formFarm?.stage || '',
+    plantingDate: formFarm?.plantingDate || '',
+    harvestDate: formFarm?.harvestDate || '',
+    soilType: formFarm?.soilType || ''
   });
 
   const [waterData, setWaterData] = useState(
-    initialProfile?.farm?.waterSource || initialProfile?.farm?.water?.otherSource || ''
+    formFarm?.waterSource || formFarm?.water?.otherSource || ''
   );
+  const [farmName, setFarmName] = useState(formFarm?.name || '');
 
   // Restore the saved farmer profile on mount.
   useEffect(() => {
     const fetchFarmerProfile = async () => {
-      if (!userId) return;
-      setLoadingProfile(true);
+      if (!userId || createNewFarm) return;
       try {
         const res = await getFarmProfile(userId);
         if (res && res.data) {
@@ -96,7 +90,10 @@ export default function Profile({
           if (d.farmerName) setFarmerName(d.farmerName);
           if (d.verifiedMobile) setCurrentMobile(d.verifiedMobile);
           if (hasCoordinates(d.farm?.location)) {
-            setLocation(d.farm.location);
+            setLocation({
+              ...d.farm.location,
+              displayName: d.farm.location.displayName || d.farm.farmLocation?.displayName || null
+            });
           }
           if (d.farm?.boundary) {
             setBoundaryData(d.farm.boundary);
@@ -118,13 +115,11 @@ export default function Profile({
           console.error('[Profile] Failed to restore saved farm profile:', err);
           setError(err.message || 'Unable to restore saved farm details. Please try again.');
         }
-      } finally {
-        setLoadingProfile(false);
       }
     };
 
     fetchFarmerProfile();
-  }, [userId]);
+  }, [userId, createNewFarm]);
 
   const getActiveStepIndex = () => {
     if (currentStep === 'location') {
@@ -146,7 +141,8 @@ export default function Profile({
       farmerName: farmerName.trim(),
       verifiedMobile: currentMobile,
       farm: {
-        _id: initialProfile?.farm?._id || `farm-${userId}`,
+        _id: savedFarmIdRef.current,
+        name: farmName.trim() || null,
         location: {
           lat: Number(location.lat),
           lng: Number(location.lng),
@@ -179,7 +175,7 @@ export default function Profile({
 
   const validateFarmForSave = () => {
     const boundaryPoints = boundaryData?.points || [];
-    if (!userId || !currentMobile) {
+    if (!userId) {
       setError('Your verified account is required before saving farm details.');
       return false;
     }
@@ -206,7 +202,8 @@ export default function Profile({
     setSaving(true);
     setLocationSaved(false);
     try {
-      await saveFarmProfile(buildProfilePayload());
+      const response = await saveFarmProfile(buildProfilePayload());
+      savedFarmIdRef.current = response.data?.activeFarmId || response.data?.farm?._id || savedFarmIdRef.current;
       setLocationSaved(true);
       setCurrentStep('crop');
     } catch (err) {
@@ -224,6 +221,7 @@ export default function Profile({
     setSaving(true);
     try {
       const res = await saveFarmProfile(buildProfilePayload());
+      savedFarmIdRef.current = res.data?.activeFarmId || res.data?.farm?._id || savedFarmIdRef.current;
       setLocationSaved(true);
       onProfileComplete(res?.data || buildProfilePayload());
     } catch (err) {
@@ -246,16 +244,13 @@ export default function Profile({
               <Shield size={20} color="#10b981" />
             </div>
             <div className="brand-titles">
-              <h1 className="header-logo-text">AgriShield-AI</h1>
+              <h1 className="header-logo-text">AgriShield</h1>
               <span className="header-subtag">Smart Farm Setup</span>
             </div>
           </div>
         </div>
 
         <div className="header-right">
-          <button className="icon-action-btn" title="Notifications">
-            <Bell size={18} />
-          </button>
           <div className="farmer-profile-pill">
             <div className="header-avatar">
               <User size={16} />
@@ -315,9 +310,10 @@ export default function Profile({
           <ProfileCard
             farmerName={farmerName}
             setFarmerName={setFarmerName}
+            farmName={farmName}
+            setFarmName={setFarmName}
             mobile={currentMobile}
             setMobile={setCurrentMobile}
-            userId={userId}
             onNext={() => setCurrentStep('location')}
           />
         )}

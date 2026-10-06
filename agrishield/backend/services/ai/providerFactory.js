@@ -1,5 +1,8 @@
 const OpenAIProvider = require('./openaiProvider');
 const OllamaProvider = require('./ollamaProvider');
+const GeminiProvider = require('./geminiProvider');
+const { getAIConfig } = require('./aiConfig');
+const elevenLabsService = require('../elevenLabsService');
 const { ERROR_CODES, AgriShieldError } = require('../../utils/errors');
 
 class ProviderFactory {
@@ -8,7 +11,7 @@ class ProviderFactory {
   }
 
   getProvider(providerName) {
-    const selected = (providerName || process.env.AI_PROVIDER || 'ollama').toLowerCase().trim();
+    const selected = (providerName || process.env.AI_PROVIDER || 'gemini').toLowerCase().trim();
 
     if (this.instances.has(selected)) {
       return this.instances.get(selected);
@@ -22,6 +25,9 @@ class ProviderFactory {
       case 'ollama':
         instance = new OllamaProvider();
         break;
+      case 'gemini':
+        instance = new GeminiProvider();
+        break;
       default:
         throw new AgriShieldError(ERROR_CODES.AI_NOT_CONFIGURED, `Unsupported AI provider '${selected}'.`, 503);
     }
@@ -31,17 +37,21 @@ class ProviderFactory {
   }
 
   getStatus() {
-    const currentName = (process.env.AI_PROVIDER || 'ollama').toLowerCase().trim();
+    const config = getAIConfig();
+    const currentName = config.provider;
     const apiKey = process.env.OPENAI_API_KEY;
     const openaiConfigured = Boolean(apiKey && apiKey.length > 5);
-    const textModel = process.env.OLLAMA_MODEL || process.env.AI_MODEL ||
-      (currentName === 'ollama' ? 'qwen2.5:3b' : 'gpt-4o-mini');
-    const visionModel = process.env.OLLAMA_VISION_MODEL || process.env.AI_VISION_MODEL || '';
+    const textModel = currentName === 'gemini'
+      ? config.textModel
+      : process.env.OLLAMA_MODEL || process.env.AI_MODEL ||
+        (currentName === 'ollama' ? 'qwen2.5:3b' : 'gpt-4o-mini');
     const isConfigured = currentName === 'ollama'
       ? Boolean(textModel)
-      : currentName === 'openai' && openaiConfigured;
+      : currentName === 'openai'
+        ? openaiConfigured
+        : currentName === 'gemini' && Boolean(config.geminiApiKey);
     const defaultModel = textModel;
-    const ttsProvider = process.env.AI_TTS_PROVIDER || 'google-cloud';
+    const voiceStatus = elevenLabsService.getStatus();
 
     return {
       provider: currentName,
@@ -50,23 +60,21 @@ class ProviderFactory {
         ? process.env.OLLAMA_BASE_URL || process.env.LOCAL_AI_BASE_URL || 'http://127.0.0.1:11434'
         : null,
       model: defaultModel,
-      visionModel: visionModel || null,
-      visionConfigured: currentName === 'openai'
-        ? Boolean(process.env.OPENAI_API_KEY && process.env.AI_VISION_MODEL)
-        : Boolean(visionModel),
-      sttProvider: process.env.AI_STT_PROVIDER || (currentName === 'ollama' ? 'whisper-local' : 'openai'),
-      sttConfigured: (process.env.AI_STT_PROVIDER || (currentName === 'ollama' ? 'whisper-local' : 'openai')) === 'whisper-local'
-        ? Boolean(process.env.WHISPER_MODEL || 'onnx-community/whisper-tiny')
-        : Boolean(openaiConfigured),
-      ttsProvider,
+      visionModel: config.visionModel,
+      visionConfigured: Boolean(config.geminiApiKey),
+      geminiVisionModel: config.visionModel,
+      geminiVisionConfigured: Boolean(config.geminiApiKey),
+      liveModel: config.liveModel,
+      liveConfigured: Boolean(config.geminiApiKey) && config.liveEnabled,
+      geminiConfigured: Boolean(config.geminiApiKey),
+      sttProvider: voiceStatus.stt.provider,
+      sttConfigured: voiceStatus.stt.configured,
+      sttStatus: voiceStatus.stt,
+      ttsProvider: voiceStatus.tts.provider,
+      voiceStatus,
       openaiConfigured,
-      ttsConfigured: ttsProvider === 'openai'
-        ? openaiConfigured
-        : ttsProvider === 'google-cloud'
-          ? Boolean(process.env.GOOGLE_CLOUD_TTS_API_KEY)
-          : ttsProvider === 'google-cloud-service-account'
-            ? Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS)
-          : ttsProvider === 'web-speech',
+      ttsConfigured: voiceStatus.tts.configured,
+      ttsStatus: voiceStatus.tts,
       weatherProvider: 'open-meteo'
     };
   }

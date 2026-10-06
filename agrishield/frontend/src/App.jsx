@@ -3,7 +3,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import Login from './pages/Login';
 import Profile from './pages/Profile';
 import Dashboard from './pages/Dashboard';
-import { getCurrentSession, logoutSession } from './services/api';
+import { getCurrentSession, logoutSession, selectActiveFarm } from './services/api';
 import { getFirebaseAuth } from './services/firebase';
 
 const CLEAN_BASELINE_PROFILE = {
@@ -38,6 +38,8 @@ function App() {
   const [sessionErrorCode, setSessionErrorCode] = useState('');
   const [mobile, setMobile] = useState('');
   const [profile, setProfile] = useState(CLEAN_BASELINE_PROFILE);
+  const [farmTransitionError, setFarmTransitionError] = useState('');
+  const [createNewFarm, setCreateNewFarm] = useState(false);
   const firebaseAuthRef = useRef(null);
 
   useEffect(() => {
@@ -68,6 +70,8 @@ function App() {
           farm: { ...CLEAN_BASELINE_PROFILE.farm, ...serverProfile.farm }
         };
         setProfile(restored);
+        setFarmTransitionError('');
+        setCreateNewFarm(false);
         setMobile(firebaseUser.phoneNumber || restored.verifiedMobile || '');
         const hasSavedBoundary = (restored.farm?.boundary?.points?.length || restored.farm?.farmBoundary?.length || 0) >= 3;
         setStage(restored.farmerName && hasSavedBoundary ? 'dashboard' : 'profile');
@@ -111,8 +115,34 @@ function App() {
   };
 
   const handleProfileComplete = (savedProfile) => {
-    setProfile(savedProfile);
+    const restored = {
+      ...CLEAN_BASELINE_PROFILE,
+      ...savedProfile,
+      farm: { ...CLEAN_BASELINE_PROFILE.farm, ...savedProfile.farm }
+    };
+    setProfile(restored);
+    setCreateNewFarm(false);
     setStage('dashboard');
+  };
+
+  const handleFarmSwitch = async (farmId) => {
+    if (!farmId || farmId === profile.activeFarmId) return;
+    setFarmTransitionError('');
+    setStage('farm-transition');
+    try {
+      const selectedProfile = await selectActiveFarm(farmId);
+      const restored = {
+        ...CLEAN_BASELINE_PROFILE,
+        ...selectedProfile,
+        farm: { ...CLEAN_BASELINE_PROFILE.farm, ...selectedProfile.farm }
+      };
+      setProfile(restored);
+      setMobile(restored.verifiedMobile || mobile);
+      setStage('dashboard');
+    } catch (error) {
+      setFarmTransitionError(error.message || 'The selected farm could not be loaded.');
+      setStage('dashboard');
+    }
   };
 
   const handleLogout = async () => {
@@ -162,6 +192,7 @@ function App() {
         farm: { ...CLEAN_BASELINE_PROFILE.farm, ...savedProfile.farm }
       };
       setProfile(restored);
+      setFarmTransitionError('');
       setMobile(firebaseUser.phoneNumber || restored.verifiedMobile || '');
       const hasSavedBoundary = (restored.farm?.boundary?.points?.length || restored.farm?.farmBoundary?.length || 0) >= 3;
       setStage(restored.farmerName && hasSavedBoundary ? 'dashboard' : 'profile');
@@ -203,6 +234,9 @@ function App() {
       {stage === 'checking' && (
         <div className="login-viewport" role="status">Loading account...</div>
       )}
+      {stage === 'farm-transition' && (
+        <div className="login-viewport" role="status">Loading farm data...</div>
+      )}
       {stage === 'login' && (
         <div className="login-viewport">
           <Login onLoginSuccess={handleLoginSuccess} sessionError={sessionError} />
@@ -225,13 +259,19 @@ function App() {
           verifiedMobile={mobile || profile.verifiedMobile || ''}
           initialProfile={profile}
           onProfileComplete={handleProfileComplete}
-          onLogout={handleLogout}
+          createNewFarm={createNewFarm}
         />
       )}
 
       {stage === 'dashboard' && (
         <Dashboard
           profile={profile}
+          farmTransitionError={farmTransitionError}
+          onFarmSwitch={handleFarmSwitch}
+          onAddFarm={() => {
+            setCreateNewFarm(true);
+            setStage('profile');
+          }}
           onEditFarm={() => {
             setStage('profile');
             localStorage.setItem('agrishield_stage', 'profile');

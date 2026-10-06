@@ -12,11 +12,15 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google/genai": "^2.27.0",
     "@huggingface/transformers": "^4.3.0",
+    "cloudinary": "^2.11.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.3",
     "express": "^5.2.1",
     "firebase-admin": "^14.5.0",
-    "multer": "^2.4.0"
+    "libphonenumber-js": "^1.13.14",
+    "multer": "^2.4.0",
+    "tz-lookup": "^6.1.25"
   }
 }

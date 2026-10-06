@@ -15,6 +15,8 @@ import {
   Wind
 } from 'lucide-react';
 import { getFarmWeather, getRecentRadarFrame } from '../services/api';
+import { useAppPreferences } from '../services/useAppPreferences';
+import { translate } from '../i18n';
 import WeatherRainMap from './WeatherRainMap';
 
 function displayValue(value, suffix = '') {
@@ -201,6 +203,8 @@ function forecastSummary(analysis) {
 }
 
 export default function WeatherView({ onAskWeatherToAI, onOpenFarmSetup, profile }) {
+  const { language } = useAppPreferences();
+  const t = (key, values) => translate(language, key, values);
   const [weather, setWeather] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -321,7 +325,7 @@ export default function WeatherView({ onAskWeatherToAI, onOpenFarmSetup, profile
         <div className="weather-title-row">
           <span className="weather-heading-icon"><CloudRain size={23} aria-hidden="true" /></span>
           <div>
-            <h3>Weather & Agricultural Advisory</h3>
+            <h3>{t('weather.title')}</h3>
             <p>Forecasts for your saved farm location, from the configured weather provider.</p>
           </div>
           {!loading && (
@@ -704,7 +708,7 @@ export default function WeatherView({ onAskWeatherToAI, onOpenFarmSetup, profile
       <div className="weather-action-card">
         <div>
           <h4>Need guidance about your farm conditions?</h4>
-          <p>Ask AgriShield AI. It will use weather data only when it is available.</p>
+          <p>Ask the AI assistant. It will use weather data only when it is available.</p>
         </div>
         <button type="button" className="btn-ask-weather-ai" onClick={() => onAskWeatherToAI?.()}>
           Ask AI about Weather

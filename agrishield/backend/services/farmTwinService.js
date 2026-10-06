@@ -6,9 +6,17 @@ const FARM_STATES = {
   HIGH_HUMIDITY: 'HIGH_HUMIDITY'
 };
 const HIGH_HEAT_THRESHOLD_C = 38;
+const { resolveFarmTimeZone } = require('./farmTimezoneService');
 
 function getFarmEnvironmentState(farm = {}, options = {}) {
   const weather = options.weatherData?.available ? options.weatherData : null;
+  const farmLocation = farm.farmLocation || farm.location || {};
+  const timezone = resolveFarmTimeZone({
+    ...farm,
+    ...farmLocation,
+    timezone: farm.timezone || farm.timeZone ||
+      farmLocation.timezone || farmLocation.timeZone || weather?.timezone
+  });
   const data = weather?.data || {};
   const temperature = Number(data.temperatureC);
   const humidity = Number(data.humidityPercent);
@@ -47,9 +55,11 @@ function getFarmEnvironmentState(farm = {}, options = {}) {
 
   return {
     farmId: farm._id || farm.id || null,
-    farmLocation: farm.farmLocation ? {
-      latitude: farm.farmLocation.latitude,
-      longitude: farm.farmLocation.longitude
+    timezone,
+    farmLocation: farm.farmLocation || farm.location ? {
+      latitude: farmLocation.latitude ?? farmLocation.lat,
+      longitude: farmLocation.longitude ?? farmLocation.lng,
+      timezone
     } : null,
     environmentState,
     secondaryStates,

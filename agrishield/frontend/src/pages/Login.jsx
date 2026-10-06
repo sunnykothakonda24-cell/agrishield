@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
   updateProfile
 } from 'firebase/auth';
 import {
@@ -9,65 +10,65 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle,
+  Eye,
+  EyeOff,
   KeyRound,
-  RefreshCw,
-  ShieldCheck
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+  Sprout,
+  User
 } from 'lucide-react';
-import { getFirebaseAuthErrorMessage, logFirebaseAuthError, logFirebaseAuthEvent } from '../services/firebaseAuthErrors';
 import { getFirebaseAuth } from '../services/firebase';
-
-const emptyOtp = ['', '', '', '', '', ''];
+import { getAppPreferences } from '../services/appPreferences';
+import { translate } from '../i18n';
+import {
+  getFirebaseAuthErrorMessage,
+  getPasswordResetErrorMessage,
+  isValidEmail,
+  logFirebaseAuthError
+} from '../services/firebaseAuthErrors';
 
 export default function Login({ onLoginSuccess, sessionError = '' }) {
-  const [stage, setStage] = useState('phone');
-  const [accountMode, setAccountMode] = useState('login');
-  const [farmerName, setFarmerName] = useState('');
-  const [mobile, setMobile] = useState('');
-  const [otp, setOtp] = useState(emptyOtp);
+  // mode: 'login' | 'create' | 'forgot'
+  const [mode, setMode] = useState('login');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(sessionError);
   const [infoMessage, setInfoMessage] = useState('');
-  const captchaVerifierRef = useRef(null);
-  const captchaContainerRef = useRef(null);
-  const confirmationResultRef = useRef(null);
-  const otpInputRef = useRef(null);
   const requestInFlightRef = useRef(false);
 
-  const clearCaptcha = () => {
-    captchaVerifierRef.current?.clear();
-    captchaVerifierRef.current = null;
-    confirmationResultRef.current = null;
+  const language = getAppPreferences().language;
+  const t = (key, values) => translate(language, key, values);
+
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setError('');
+    setInfoMessage('');
+    setPassword('');
+    setConfirmPassword('');
   };
 
-  useEffect(() => () => {
-    captchaVerifierRef.current?.clear();
-    captchaVerifierRef.current = null;
-    confirmationResultRef.current = null;
-  }, []);
-
-  const createCaptchaVerifier = (auth) => {
-    if (!captchaVerifierRef.current) {
-      if (!captchaContainerRef.current) {
-        throw new Error('The phone verification security check is not ready. Please try again.');
-      }
-      logFirebaseAuthEvent('Creating reCAPTCHA verifier');
-      captchaVerifierRef.current = new RecaptchaVerifier(auth, captchaContainerRef.current, {
-        size: 'invisible'
-      });
-    }
-    return captchaVerifierRef.current;
-  };
-
-  const sendPhoneOtp = async (event) => {
+  const handleLogin = async (event) => {
     event?.preventDefault();
     if (requestInFlightRef.current) return;
-    const cleanedPhone = mobile.replace(/\D/g, '');
-    if (cleanedPhone.length !== 10) {
-      setError('Enter a valid 10-digit Indian mobile number.');
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError('Please enter your email.');
       return;
     }
-    if (accountMode === 'create' && farmerName.trim().length < 2) {
-      setError('Enter your name to create an account.');
+    if (!isValidEmail(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your password.');
       return;
     }
 
@@ -75,200 +76,467 @@ export default function Login({ onLoginSuccess, sessionError = '' }) {
     setInfoMessage('');
     requestInFlightRef.current = true;
     setLoading(true);
+
     try {
-      logFirebaseAuthEvent('Initializing phone authentication');
       const auth = getFirebaseAuth();
-      clearCaptcha();
-      logFirebaseAuthEvent('Requesting phone verification');
-      confirmationResultRef.current = await signInWithPhoneNumber(
-        auth,
-        `+91${cleanedPhone}`,
-        createCaptchaVerifier(auth)
-      );
-      logFirebaseAuthEvent('Verification request succeeded');
-      setInfoMessage(`Verification code sent to +91 ${cleanedPhone}.`);
-      setStage('otp');
-      setOtp(emptyOtp);
-      window.setTimeout(() => otpInputRef.current?.focus(), 0);
-    } catch (sendError) {
-      logFirebaseAuthError(sendError, 'OTP send');
-      logFirebaseAuthEvent(`Verification request failed: ${sendError?.code || 'unknown_error'}`);
-      clearCaptcha();
-      setError(getFirebaseAuthErrorMessage(
-        sendError,
-        'Could not send a verification code. Check Firebase Phone Authentication and authorized domains.'
-      ));
+      await signInWithEmailAndPassword(auth, trimmedEmail, password);
+      onLoginSuccess?.();
+    } catch (err) {
+      logFirebaseAuthError(err, 'signInWithEmailAndPassword');
+      setError(getFirebaseAuthErrorMessage(err));
     } finally {
       requestInFlightRef.current = false;
       setLoading(false);
     }
   };
 
-  const verifyPhoneOtp = async (event) => {
+  const handleCreateAccount = async (event) => {
     event?.preventDefault();
     if (requestInFlightRef.current) return;
-    const code = otp.join('');
-    if (code.length !== 6) {
-      setError('Enter the complete 6-digit verification code.');
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+
+    if (!trimmedName) {
+      setError('Please enter your name.');
+      return;
+    }
+    if (!trimmedEmail) {
+      setError('Please enter your email.');
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!password || password.length < 8) {
+      setError('Password must contain at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
       return;
     }
 
     setError('');
+    setInfoMessage('');
     requestInFlightRef.current = true;
     setLoading(true);
-    try {
-      if (!confirmationResultRef.current) {
-        throw new Error('The verification request expired. Send a new code and try again.');
-      }
-      const result = await confirmationResultRef.current.confirm(code);
-      const user = result.user;
-      logFirebaseAuthEvent('OTP confirmation succeeded');
 
-      if (accountMode === 'create' && farmerName.trim()) {
-        await updateProfile(user, { displayName: farmerName.trim() });
+    try {
+      const auth = getFirebaseAuth();
+      const credential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+      if (trimmedName && credential.user) {
+        await updateProfile(credential.user, { displayName: trimmedName });
       }
-      clearCaptcha();
       onLoginSuccess?.();
-    } catch (verifyError) {
-      logFirebaseAuthError(verifyError, 'OTP verification');
-      logFirebaseAuthEvent(`OTP confirmation failed: ${verifyError?.code || 'unknown_error'}`);
-      setError(getFirebaseAuthErrorMessage(
-        verifyError,
-        'The verification code was not accepted. Please try again.'
-      ));
+    } catch (err) {
+      logFirebaseAuthError(err, 'createUserWithEmailAndPassword');
+      setError(getFirebaseAuthErrorMessage(err));
     } finally {
       requestInFlightRef.current = false;
       setLoading(false);
     }
   };
 
-  const changeAccountMode = (mode) => {
-    clearCaptcha();
-    setAccountMode(mode);
+  const handleForgotPassword = async (event) => {
+    event?.preventDefault();
+    if (requestInFlightRef.current) return;
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError('Please enter your email.');
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
     setError('');
     setInfoMessage('');
-    setStage('phone');
+    requestInFlightRef.current = true;
+    setLoading(true);
+
+    try {
+      const auth = getFirebaseAuth();
+      await sendPasswordResetEmail(auth, trimmedEmail);
+      setInfoMessage('Password reset email sent. Please check your inbox.');
+    } catch (err) {
+      logFirebaseAuthError(err, 'sendPasswordResetEmail');
+      setError(getPasswordResetErrorMessage(err));
+    } finally {
+      requestInFlightRef.current = false;
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="auth-container animate-slideUp">
-      <div className="brand-badge-center">
-        <div className="brand-icon-box">
-          <ShieldCheck size={28} color="#10b981" />
+    <div className={`auth-container auth-shell auth-mode-${mode} animate-slideUp`}>
+      <aside className="auth-visual-panel">
+        <div className="auth-brand-lockup">
+          <span className="auth-brand-mark"><ShieldCheck size={23} /></span>
+          <span className="auth-brand-name">AgriShield</span>
         </div>
-        <h1 className="logo-text">AgriShield-AI</h1>
-        <span className="brand-tagline">Smart Farming • Smarter Decisions</span>
-      </div>
 
-      <div id="firebase-recaptcha-container" ref={captchaContainerRef} />
+        <div className="auth-visual-copy">
+          <span className="auth-visual-kicker">{t('auth.brandTagline')}</span>
+          <h1>{t('auth.visualHeading')}</h1>
+          <p>{t('auth.visualDescription')}</p>
+        </div>
 
-      {stage === 'phone' ? (
-        <form onSubmit={sendPhoneOtp} className="auth-form">
-          <div className="form-heading-block">
-            <h2 className="form-title">{accountMode === 'create' ? 'Create your AgriShield-AI account' : 'Farmer Login'}</h2>
-            <p className="form-subtitle">
-              {accountMode === 'create'
-                ? 'Enter your name and mobile number to get started.'
-                : 'Sign in securely with a phone verification code.'}
-            </p>
+        <div className="auth-field-art" aria-hidden="true">
+          <div className="auth-field-sun" />
+          <div className="auth-field-orbit auth-field-orbit-one" />
+          <div className="auth-field-orbit auth-field-orbit-two" />
+          <div className="auth-field-lines" />
+          <span className="auth-field-leaf"><Sprout size={92} strokeWidth={1.1} /></span>
+        </div>
+
+        <div className="auth-visual-promises">
+          <div className="auth-promise">
+            <span><LockKeyhole size={16} /></span>
+            <p>{t('auth.promiseSecure')}</p>
           </div>
+          <div className="auth-promise">
+            <span><CheckCircle size={16} /></span>
+            <p>{t('auth.promiseFarm')}</p>
+          </div>
+        </div>
+      </aside>
 
-          {accountMode === 'create' && (
-            <div className="input-group">
-              <label className="input-label" htmlFor="signup-farmer-name">Farmer Name</label>
+      <section className="auth-form-panel" aria-label={t('auth.formRegion')}>
+        <div className="auth-secure-label"><ShieldCheck size={15} />{t('auth.secureAccess')}</div>
+
+        {mode === 'login' && (
+          <form onSubmit={handleLogin} className="auth-form">
+            <div className="form-heading-block">
+              <h2 className="form-title">{t('auth.loginHeading')}</h2>
+              <p className="form-subtitle">{t('auth.loginDescription')}</p>
+            </div>
+
+            {infoMessage && (
+              <div className="alert-message info" role="status">
+                <CheckCircle size={15} /><span>{infoMessage}</span>
+              </div>
+            )}
+
+            <div className="input-group auth-input-group">
+              <label className="input-label" htmlFor="login-email">
+                <span>Email</span>
+              </label>
+              <div className="auth-password-wrapper">
+                <input
+                  id="login-email"
+                  type="email"
+                  className="input-field auth-text-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  autoComplete="email"
+                  disabled={loading}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="input-group auth-input-group">
+              <div className="input-label-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label className="input-label" htmlFor="login-password" style={{ margin: 0 }}>
+                  <span>Password</span>
+                </label>
+                <button
+                  type="button"
+                  className="btn-text secondary"
+                  onClick={() => switchMode('forgot')}
+                  disabled={loading}
+                  style={{ fontSize: '0.82rem', padding: 0 }}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+              <div className="auth-password-wrapper" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  id="login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="input-field auth-text-input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                  disabled={loading}
+                  style={{ width: '100%', paddingRight: '44px' }}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  disabled={loading}
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '4px'
+                  }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="alert-message error" role="alert">
+                <AlertCircle size={15} /><span>{error}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="btn-primary auth-submit-button"
+              disabled={loading || !email.trim() || !password}
+            >
+              {loading ? (
+                <><div className="loader" />Logging in...</>
+              ) : (
+                <><span>Login</span><ArrowRight size={18} /></>
+              )}
+            </button>
+
+            <div className="auth-account-switch">
+              <span>Don't have an account?</span>
+              <button
+                type="button"
+                className="btn-text"
+                onClick={() => switchMode('create')}
+                disabled={loading}
+              >
+                Create Account
+              </button>
+            </div>
+          </form>
+        )}
+
+        {mode === 'create' && (
+          <form onSubmit={handleCreateAccount} className="auth-form">
+            <div className="form-heading-block">
+              <h2 className="form-title">Create Account</h2>
+              <p className="form-subtitle">Join AgriShield to manage and protect your farms</p>
+            </div>
+
+            <div className="input-group auth-input-group">
+              <label className="input-label" htmlFor="signup-name">
+                <span>Name</span>
+              </label>
               <input
-                id="signup-farmer-name"
+                id="signup-name"
                 type="text"
-                className="input-field"
-                value={farmerName}
-                onChange={(event) => setFarmerName(event.target.value)}
+                className="input-field auth-text-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 placeholder="Enter your name"
                 autoComplete="name"
                 disabled={loading}
                 required
               />
             </div>
-          )}
 
-          <div className="input-group">
-            <label className="input-label" htmlFor="login-mobile">Mobile Number</label>
-            <div className="phone-input-wrapper">
-              <span className="country-code">+91</span>
+            <div className="input-group auth-input-group">
+              <label className="input-label" htmlFor="signup-email">
+                <span>Email</span>
+              </label>
               <input
-                id="login-mobile"
-                type="tel"
-                className="input-field phone-field"
-                placeholder="98765 43210"
-                value={mobile}
-                onChange={(event) => setMobile(event.target.value.replace(/\D/g, '').slice(0, 10))}
+                id="signup-email"
+                type="email"
+                className="input-field auth-text-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email"
+                autoComplete="email"
                 disabled={loading}
-                autoComplete="tel-national"
-                inputMode="numeric"
                 required
               />
             </div>
-          </div>
 
-          {error && <div className="alert-message error" role="alert"><AlertCircle size={15} /><span>{error}</span></div>}
+            <div className="input-group auth-input-group">
+              <label className="input-label" htmlFor="signup-password">
+                <span>Password</span>
+              </label>
+              <div className="auth-password-wrapper" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  id="signup-password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="input-field auth-text-input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
+                  disabled={loading}
+                  style={{ width: '100%', paddingRight: '44px' }}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  disabled={loading}
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '4px'
+                  }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
 
-          <button type="submit" className="btn-primary" disabled={loading || mobile.length !== 10}>
-            {loading ? <><div className="loader" /> Sending code...</> : <><span>Send OTP</span><ArrowRight size={18} /></>}
-          </button>
+            <div className="input-group auth-input-group">
+              <label className="input-label" htmlFor="signup-confirm-password">
+                <span>Confirm Password</span>
+              </label>
+              <div className="auth-password-wrapper" style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  id="signup-confirm-password"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  className="input-field auth-text-input"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter your password"
+                  autoComplete="new-password"
+                  disabled={loading}
+                  style={{ width: '100%', paddingRight: '44px' }}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  disabled={loading}
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '4px'
+                  }}
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
 
-          <div className="auth-account-switch">
-            {accountMode === 'login' ? (
-              <span>New to AgriShield-AI?</span>
-            ) : (
-              <span>Already have an account?</span>
+            {error && (
+              <div className="alert-message error" role="alert">
+                <AlertCircle size={15} /><span>{error}</span>
+              </div>
             )}
+
             <button
-              type="button"
-              className="btn-text"
-              onClick={() => changeAccountMode(accountMode === 'login' ? 'create' : 'login')}
-              disabled={loading}
+              type="submit"
+              className="btn-primary auth-submit-button"
+              disabled={loading || !name.trim() || !email.trim() || !password || !confirmPassword}
             >
-              {accountMode === 'login' ? 'Create Account' : 'Login'}
+              {loading ? (
+                <><div className="loader" />Creating Account...</>
+              ) : (
+                <><span>Create Account</span><ArrowRight size={18} /></>
+              )}
             </button>
-          </div>
-        </form>
-      ) : (
-        <form onSubmit={verifyPhoneOtp} className="auth-form">
-          <div className="form-heading-block">
-            <h2 className="form-title">Verify your number</h2>
-            <p className="form-subtitle">Enter the 6-digit code sent to +91 {mobile}.</p>
-          </div>
 
-          {infoMessage && <div className="alert-message info" role="status"><CheckCircle size={15} /><span>{infoMessage}</span></div>}
+            <div className="auth-account-switch">
+              <span>Already have an account?</span>
+              <button
+                type="button"
+                className="btn-text"
+                onClick={() => switchMode('login')}
+                disabled={loading}
+              >
+                Login
+              </button>
+            </div>
+          </form>
+        )}
 
-          <label className="input-label" htmlFor="firebase-otp">Verification code</label>
-          <input
-            id="firebase-otp"
-            ref={otpInputRef}
-            type="text"
-            className="input-field otp-code-field"
-            value={otp.join('')}
-            onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6).split('').concat(emptyOtp).slice(0, 6))}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            disabled={loading}
-            required
-          />
-          {error && <div className="alert-message error" role="alert"><AlertCircle size={15} /><span>{error}</span></div>}
+        {mode === 'forgot' && (
+          <form onSubmit={handleForgotPassword} className="auth-form">
+            <div className="form-heading-block">
+              <h2 className="form-title">Forgot Password?</h2>
+              <p className="form-subtitle">Enter your registered email to receive a password reset link</p>
+            </div>
 
-          <button type="submit" className="btn-primary" disabled={loading || otp.join('').length !== 6}>
-            {loading ? <><div className="loader" /> Verifying...</> : <><KeyRound size={18} /><span>Verify & Continue</span></>}
-          </button>
-          <div className="otp-footer-actions">
-            <button type="button" className="btn-text" onClick={sendPhoneOtp} disabled={loading}>
-              <RefreshCw size={14} /> Resend code
+            {infoMessage && (
+              <div className="alert-message info" role="status">
+                <CheckCircle size={15} /><span>{infoMessage}</span>
+              </div>
+            )}
+
+            <div className="input-group auth-input-group">
+              <label className="input-label" htmlFor="reset-email">
+                <span>Email</span>
+              </label>
+              <input
+                id="reset-email"
+                type="email"
+                className="input-field auth-text-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email"
+                autoComplete="email"
+                disabled={loading}
+                required
+              />
+            </div>
+
+            {error && (
+              <div className="alert-message error" role="alert">
+                <AlertCircle size={15} /><span>{error}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="btn-primary auth-submit-button"
+              disabled={loading || !email.trim()}
+            >
+              {loading ? (
+                <><div className="loader" />Sending Link...</>
+              ) : (
+                <><span>Send Password Reset Link</span><Mail size={18} /></>
+              )}
             </button>
-            <button type="button" className="btn-text secondary" onClick={() => { clearCaptcha(); setStage('phone'); setOtp(emptyOtp); setError(''); }} disabled={loading}>
-              <ArrowLeft size={14} /> Change number
-            </button>
-          </div>
-        </form>
-      )}
+
+            <div className="auth-account-switch" style={{ justifyContent: 'center', marginTop: '24px' }}>
+              <button
+                type="button"
+                className="btn-text secondary"
+                onClick={() => switchMode('login')}
+                disabled={loading}
+              >
+                <ArrowLeft size={16} /> Back to Login
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
     </div>
   );
 }

@@ -1,9 +1,11 @@
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const { getFarmEnvironmentState } = require('./services/farmTwinService');
+const { resolveFarmTimeZone } = require('./services/farmTimezoneService');
 const weatherService = require('./services/weatherService');
 const rainViewerService = require('./services/rainViewerService');
 const { queueFarmDataRefresh } = require('./services/farmDataRefreshService');
@@ -11,10 +13,13 @@ const { normalizeFarmBoundary } = require('./utils/farmGeometry');
 const {
   requireFirebaseFarmer,
   requireFirebaseIdentity,
+  requireActiveFarm,
   requireRecentFirebaseIdentity
 } = require('./middleware/firebaseAuth');
 const {
   getFirebaseAdminConfigurationError,
+  getPrivateFirestoreConfigurationError,
+  getApplicationFirebaseAdminConfigurationError,
   getFirebaseAdminRuntimeStatus,
   getFirebaseAuth
 } = require('./services/firebaseAdmin');
@@ -26,23 +31,61 @@ const accountDeletionService = require('./services/accountDeletionService');
 const { getFarmerProfile } = require('./services/farmerProfileService');
 const providerFactory = require('./services/ai/providerFactory');
 const conversationStorageService = require('./services/conversationStorageService');
+const elevenLabsService = require('./services/elevenLabsService');
+const { LANGUAGES } = require('./services/ai/languageRegistry');
+const { getAIConfig } = require('./services/ai/aiConfig');
+const cloudinaryImageService = require('./services/cloudinaryImageService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-const allowedOrigins = (process.env.FRONTEND_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction && getAIConfig().provider !== 'gemini') {
+  throw new Error('AI_PROVIDER must be gemini in production.');
+}
+const configuredCorsOrigins = process.env.CORS_ALLOWED_ORIGINS ||
+  (!isProduction ? process.env.FRONTEND_ORIGINS || 'http://localhost:5173,http://localhost:3000' : '');
+const allowedOrigins = configuredCorsOrigins
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+if (isProduction) {
+  if (allowedOrigins.length === 0) {
+    throw new Error('CORS_ALLOWED_ORIGINS must contain the HTTPS deployment origin in production.');
+  }
+  for (const origin of allowedOrigins) {
+    let parsedOrigin;
+    try {
+      parsedOrigin = new URL(origin);
+    } catch {
+      throw new Error('CORS_ALLOWED_ORIGINS must contain valid HTTPS origins only.');
+    }
+    if (origin === '*' || parsedOrigin.protocol !== 'https:' || parsedOrigin.origin !== origin ||
+        ['localhost', '127.0.0.1', '[::1]'].includes(parsedOrigin.hostname)) {
+      throw new Error('CORS_ALLOWED_ORIGINS must contain exact public HTTPS origins in production.');
+    }
+  }
+}
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
     return callback(new Error('Origin is not allowed by the AgriShield API.'));
   },
   credentials: true
 }));
 app.use(express.json());
+app.set('trust proxy', process.env.TRUST_PROXY === '1' ? 1 : false);
+app.use('/api/ai/speak/stream', (req, res, next) => {
+  req.ttsRequestReceivedAt = performance.now();
+  const clientStartedAt = Number(req.get('X-AgriShield-TTS-Client-Started-At'));
+  req.ttsClientElapsedMs = Number.isSafeInteger(clientStartedAt)
+    ? Math.max(0, Date.now() - clientStartedAt)
+    : undefined;
+  next();
+});
 
 let lastGeocodeRequestAt = 0;
 let geocodeQueue = Promise.resolve();
@@ -96,7 +139,7 @@ app.get('/api/health', async (req, res) => {
     textModelInstalled: false,
     visionModelInstalled: false
   };
-  if ((process.env.AI_PROVIDER || 'ollama').toLowerCase() === 'ollama') {
+  if (getAIConfig().provider === 'ollama') {
     try {
       ollama = await providerFactory.getProvider('ollama').checkHealth();
     } catch (error) {
@@ -104,19 +147,96 @@ app.get('/api/health', async (req, res) => {
     }
   }
   const firebaseAdmin = getFirebaseAdminRuntimeStatus();
+  const [privateFirestore, applicationFirestore] = await Promise.all([
+    firestoreRepository.checkPrivateHealth(),
+    firestoreRepository.checkHealth()
+  ]);
   const conversationStorage = await conversationStorageService.checkHealth();
-  const aiReady = (process.env.AI_PROVIDER || 'ollama').toLowerCase() !== 'ollama' ||
-    (ollama.connected && ollama.textModelInstalled);
-  const storageReady = conversationStorage.connected;
+  const aiStatus = providerFactory.getStatus();
+  const voiceStatus = elevenLabsService.getStatus();
+  const aiReady = aiStatus.provider === 'ollama'
+    ? Boolean(ollama.connected && ollama.textModelInstalled)
+    : aiStatus.isConfigured;
+  const storageReady = conversationStorage.connected && privateFirestore.connected && applicationFirestore.connected;
+  const projectAStatus = {
+    projectId: firebaseAdmin.privateProject.projectId,
+    adminConfigured: firebaseAdmin.privateProject.adminConfigured,
+    authConfigured: firebaseAdmin.privateProject.authConfigured,
+    firestoreConfigured: privateFirestore.configured,
+    firestoreConnected: privateFirestore.connected,
+    authConfigurationError: firebaseAdmin.privateProject.authConfigurationError ||
+      (firebaseAdmin.privateProject.authConfigured ? null : getFirebaseAdminConfigurationError()),
+    firestoreConfigurationError: firebaseAdmin.privateProject.firestoreConfigurationError ||
+      (privateFirestore.configured ? null : getPrivateFirestoreConfigurationError())
+  };
+  const projectBStatus = {
+    projectId: firebaseAdmin.applicationProject.projectId,
+    adminConfigured: firebaseAdmin.applicationProject.adminConfigured,
+    firestoreConfigured: applicationFirestore.configured,
+    firestoreConnected: applicationFirestore.connected,
+    configurationError: firebaseAdmin.applicationProject.adminConfigured
+      ? null
+      : getApplicationFirebaseAdminConfigurationError()
+  };
   return res.status(aiReady && storageReady ? 200 : 503).json({
     server: 'ok',
-    firebaseAdmin: firebaseAdmin.configured ? 'configured' : 'not_configured',
+    authentication: {
+      emailPassword: true,
+      firebaseIdentity: true
+    },
+    firebasePrivateConfigured: firebaseAdmin.privateProject.authConfigured &&
+      firebaseAdmin.privateProject.firestoreConfigured,
+    firebaseApplicationConfigured: firebaseAdmin.applicationProject.adminConfigured,
+    firebase: {
+      projectA: projectAStatus,
+      projectB: projectBStatus,
+      privateProject: {
+        ...firebaseAdmin.privateProject,
+        firestoreConfigured: privateFirestore.configured,
+        firestoreConnected: privateFirestore.connected
+      },
+      applicationProject: {
+        ...firebaseAdmin.applicationProject,
+        firestoreConfigured: applicationFirestore.configured,
+        firestoreConnected: applicationFirestore.connected
+      }
+    },
     firestoreConfigured: conversationStorage.configured,
     firestoreConnected: conversationStorage.connected,
     conversationStorage,
+    ollamaStatus: {
+      configured: (process.env.AI_PROVIDER || 'ollama').toLowerCase() === 'ollama',
+      connected: ollama.connected,
+      textModelInstalled: ollama.textModelInstalled,
+      visionModelInstalled: ollama.visionModelInstalled
+    },
     ollama: ollama.connected ? 'connected' : 'disconnected',
     textModel: ollama.textModelInstalled ? 'installed' : 'unavailable',
-    visionModel: ollama.visionModelInstalled ? 'installed' : 'unavailable'
+    visionModel: ollama.visionModelInstalled ? 'installed' : 'unavailable',
+    ai: {
+      gemini: { configured: aiStatus.geminiConfigured },
+      imageAnalysis: { configured: aiStatus.geminiVisionConfigured, reachable: null },
+      live: { configured: aiStatus.liveConfigured, model: aiStatus.liveModel }
+    },
+    cloudinary: cloudinaryImageService.status(),
+    voice: {
+      stt: voiceStatus.stt,
+      tts: voiceStatus.tts
+    }
+  });
+});
+
+app.get('/api/voice-config', requireFirebaseFarmer, (req, res) => {
+  const voiceStatus = elevenLabsService.getStatus();
+  return res.json({
+    success: true,
+    maxRecordingSeconds: getAIConfig().voiceMaxRecordingSeconds,
+    languages: Object.values(LANGUAGES).map(({ languageCode, languageName }) => ({
+      languageCode,
+      languageName
+    })),
+    stt: voiceStatus.stt,
+    tts: voiceStatus.tts
   });
 });
 
@@ -190,7 +310,7 @@ app.post('/api/auth/bootstrap', requireFirebaseIdentity, async (req, res) => {
       });
     }
     if (process.env.NODE_ENV === 'development') {
-      console.info('[AgriShield Account Sync] Firestore user and farm profile loaded.');
+      console.info('[AgriShield Account Sync] Private identity and available owned farms loaded.');
     }
     return res.json({
       success: true,
@@ -211,6 +331,53 @@ app.post('/api/auth/bootstrap', requireFirebaseIdentity, async (req, res) => {
   }
 });
 
+app.post('/api/auth/active-farm', requireFirebaseIdentity, async (req, res) => {
+  const farmId = typeof req.body?.farmId === 'string' ? req.body.farmId.trim() : '';
+  if (!farmId) {
+    return res.status(400).json({ success: false, code: 'FARM_ID_REQUIRED', message: 'Choose one of your farms.' });
+  }
+  if (!firestoreRepository.isPrivateConfigured() || !firestoreRepository.isConfigured()) {
+    return res.status(503).json({
+      success: false,
+      code: 'APPLICATION_FIRESTORE_UNAVAILABLE',
+      message: 'Farm application data is temporarily unavailable. Your sign-in remains active; please retry.'
+    });
+  }
+  try {
+    const ownedFarm = await firestoreRepository.getOwnedFarm(req.firebaseUid, farmId);
+    if (!ownedFarm) {
+      return res.status(403).json({
+        success: false,
+        code: 'FARM_ACCESS_DENIED',
+        message: 'This farm is not available to your account.'
+      });
+    }
+    const profile = await getFarmerProfile(req.firebaseUid, farmId);
+    if (!profile?.farm) {
+      return res.status(403).json({
+        success: false,
+        code: 'FARM_ACCESS_DENIED',
+        message: 'This farm is not available to your account.'
+      });
+    }
+    if (!await firestoreRepository.setUserActiveFarmId(req.firebaseUid, farmId)) {
+      return res.status(403).json({
+        success: false,
+        code: 'FARM_ACCESS_DENIED',
+        message: 'This farm is not available to your account.'
+      });
+    }
+    return res.json({ success: true, data: profile });
+  } catch (error) {
+    console.error('[AgriShield Farm Switch] Farm selection failed:', error.code || error.name || 'farm_switch_error');
+    return res.status(503).json({
+      success: false,
+      code: 'FARM_DATA_UNAVAILABLE',
+      message: 'The selected farm could not be loaded. Your current farm selection has not changed.'
+    });
+  }
+});
+
 app.delete('/api/account', requireFirebaseIdentity, requireRecentFirebaseIdentity, async (req, res) => {
   try {
     await accountDeletionService.deleteAccount(req.firebaseUid);
@@ -227,13 +394,42 @@ app.delete('/api/account', requireFirebaseIdentity, requireRecentFirebaseIdentit
 
 app.get('/api/system/status', async (req, res) => {
   const ai = providerFactory.getStatus();
-  const ttsProvider = process.env.AI_TTS_PROVIDER || 'google-cloud';
+  const voiceStatus = elevenLabsService.getStatus();
   const conversationStorage = await conversationStorageService.checkHealth();
   const firebaseAdmin = getFirebaseAdminRuntimeStatus();
+  const [privateFirestore, applicationFirestore] = await Promise.all([
+    firestoreRepository.checkPrivateHealth(),
+    firestoreRepository.checkHealth()
+  ]);
   let ollama = null;
   if (ai.provider === 'ollama') {
-    ollama = await providerFactory.getProvider('ollama').checkHealth();
+    try {
+      ollama = await providerFactory.getProvider('ollama').checkHealth();
+    } catch (error) {
+      console.error('[AgriShield System Status] Ollama health check failed:', error.code || error.name || 'provider_error');
+      ollama = { connected: false, textModelInstalled: false, visionModelInstalled: false };
+    }
   }
+  const projectAStatus = {
+    projectId: firebaseAdmin.privateProject.projectId,
+    adminConfigured: firebaseAdmin.privateProject.adminConfigured,
+    authConfigured: firebaseAdmin.privateProject.authConfigured,
+    firestoreConfigured: privateFirestore.configured,
+    firestoreConnected: privateFirestore.connected,
+    authConfigurationError: firebaseAdmin.privateProject.authConfigurationError ||
+      (firebaseAdmin.privateProject.authConfigured ? null : getFirebaseAdminConfigurationError()),
+    firestoreConfigurationError: firebaseAdmin.privateProject.firestoreConfigurationError ||
+      (privateFirestore.configured ? null : getPrivateFirestoreConfigurationError())
+  };
+  const projectBStatus = {
+    projectId: firebaseAdmin.applicationProject.projectId,
+    adminConfigured: firebaseAdmin.applicationProject.adminConfigured,
+    firestoreConfigured: applicationFirestore.configured,
+    firestoreConnected: applicationFirestore.connected,
+    configurationError: firebaseAdmin.applicationProject.adminConfigured
+      ? null
+      : getApplicationFirebaseAdminConfigurationError()
+  };
   return res.json({
     success: true,
     status: {
@@ -244,17 +440,56 @@ app.get('/api/system/status', async (req, res) => {
       localAiBaseUrl: ai.localBaseUrl,
       ollamaConnected: ollama?.connected || false,
       textModel: ai.model,
+      geminiTextModel: ai.provider === 'gemini' ? ai.model : null,
+      geminiVisionModel: ai.provider === 'gemini' ? ai.visionModel : null,
+      geminiLiveModel: ai.liveModel,
+      geminiConfigured: ai.provider === 'gemini' ? ai.isConfigured : Boolean(process.env.GEMINI_API_KEY),
+      geminiLiveConfigured: ai.liveConfigured,
+      ai: {
+        gemini: { configured: ai.geminiConfigured, provider: 'google-gemini' },
+        imageAnalysis: { configured: ai.geminiVisionConfigured, reachable: null },
+        live: { configured: ai.liveConfigured, model: ai.liveModel }
+      },
+      cloudinary: cloudinaryImageService.status(),
+      voice: {
+        stt: voiceStatus.stt,
+        tts: voiceStatus.tts
+      },
+      geminiVisionModel: ai.geminiVisionModel,
+      geminiVisionConfigured: ai.geminiVisionConfigured,
       textModelInstalled: ollama?.textModelInstalled || false,
       visionModel: ai.visionModel,
       visionModelInstalled: ollama?.visionModelInstalled || false,
       openaiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      firebaseAdmin: {
+        projectA: projectAStatus,
+        projectB: projectBStatus,
+        privateProject: { ...firebaseAdmin.privateProject, firestoreConfigured: privateFirestore.configured, firestoreConnected: privateFirestore.connected },
+        applicationProject: { ...firebaseAdmin.applicationProject, firestoreConfigured: applicationFirestore.configured, firestoreConnected: applicationFirestore.connected }
+      },
       firebaseAdminConfigured: firebaseAdmin.configured,
       firebaseAdminConfigurationError: firebaseAdmin.errorCode || getFirebaseAdminConfigurationError(),
+      authentication: {
+        emailPassword: true,
+        firebaseIdentity: true
+      },
+      firebasePrivateConfigured: firebaseAdmin.privateProject.authConfigured &&
+        privateFirestore.configured,
+      firebaseApplicationConfigured: firebaseAdmin.applicationProject.adminConfigured,
       firestoreConfigured: conversationStorage.configured,
       firestoreConnected: conversationStorage.connected,
       conversationStorage,
-      ttsProvider,
+      ollamaStatus: {
+        configured: ai.provider === 'ollama',
+        connected: ollama?.connected || false,
+        textModelInstalled: ollama?.textModelInstalled || false,
+        visionModelInstalled: ollama?.visionModelInstalled || false
+      },
+      ttsProvider: ai.ttsProvider,
       ttsConfigured: ai.ttsConfigured,
+      sttProvider: ai.sttProvider,
+      sttConfigured: ai.sttConfigured,
+      maxVoiceRecordingSeconds: require('./services/ai/aiConfig').getAIConfig().voiceMaxRecordingSeconds,
       weatherProvider: ai.weatherProvider
     }
   });
@@ -262,7 +497,7 @@ app.get('/api/system/status', async (req, res) => {
 
 app.get('/api/session', requireFirebaseFarmer, async (req, res) => {
   try {
-    const profile = await getFarmerProfile(req.farmerId);
+    const profile = await getFarmerProfile(req.farmerId, req.farmId);
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Farmer profile could not be loaded.' });
     }
@@ -276,11 +511,10 @@ app.get('/api/session', requireFirebaseFarmer, async (req, res) => {
   }
 });
 
-app.get('/api/weather', requireFirebaseFarmer, async (req, res) => {
+app.get('/api/weather', requireFirebaseFarmer, requireActiveFarm, async (req, res) => {
   try {
-    const profile = await getFarmerProfile(req.farmerId);
     const weather = await weatherService.getCurrentWeather(
-      profile?.farm?.farmLocation || null,
+      req.farmData.farmLocation || null,
       { includeNearbyRain: true }
     );
     return res.json({
@@ -294,14 +528,15 @@ app.get('/api/weather', requireFirebaseFarmer, async (req, res) => {
     console.error('[AgriShield Weather] Current weather request failed:', error.message);
     return res.status(502).json({
       success: false,
-      message: 'Weather information is temporarily unavailable.'
+      message: 'Weather information is temporarily unavailable.',
+      timezone: resolveFarmTimeZone(req.farmData.farmLocation || {})
     });
   }
 });
 
-app.get('/api/notifications', requireFirebaseFarmer, async (req, res) => {
+app.get('/api/notifications', requireFirebaseFarmer, requireActiveFarm, async (req, res) => {
   try {
-    const records = await firestoreRepository.getUserNotifications(req.farmerId);
+    const records = await firestoreRepository.getUserNotifications(req.farmerId, req.farmId);
     const notifications = records.map((record) => {
       const createdAt = record.createdAt?.toDate instanceof Function
         ? record.createdAt.toDate().toISOString()
@@ -334,13 +569,13 @@ app.get('/api/notifications', requireFirebaseFarmer, async (req, res) => {
   }
 });
 
-app.patch('/api/notifications/:id/read', requireFirebaseFarmer, async (req, res) => {
+app.patch('/api/notifications/:id/read', requireFirebaseFarmer, requireActiveFarm, async (req, res) => {
   const notificationId = typeof req.params.id === 'string' ? req.params.id.trim() : '';
   if (!notificationId) {
     return res.status(400).json({ success: false, message: 'A notification ID is required.' });
   }
   try {
-    const updated = await firestoreRepository.markNotificationAsRead(req.farmerId, notificationId);
+    const updated = await firestoreRepository.markNotificationAsRead(req.farmerId, req.farmId, notificationId);
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Notification was not found.' });
     }
@@ -354,12 +589,9 @@ app.patch('/api/notifications/:id/read', requireFirebaseFarmer, async (req, res)
   }
 });
 
-app.get('/api/farms/:farmId/crop-schedule', requireFirebaseFarmer, async (req, res) => {
+app.get('/api/farms/:farmId/crop-schedule', requireFirebaseFarmer, requireActiveFarm, async (req, res) => {
   try {
-    const farm = await firestoreRepository.getFarmForUser(req.farmerId);
-    if (!farm || farm._id !== req.params.farmId) {
-      return res.status(404).json({ success: false, message: 'Farm information is not configured yet.' });
-    }
+    const farm = req.farmData;
 
     const crop = farm.cropDetails?.name || farm.crop;
     const protocol = crop ? await firestoreRepository.getCropProtocol(crop, farm.cropDetails?.variety) : null;
@@ -393,7 +625,7 @@ app.get('/api/farms/:farmId/crop-schedule', requireFirebaseFarmer, async (req, r
   }
 });
 
-app.post('/api/farms/:farmId/activity/:activityId/status', requireFirebaseFarmer, async (req, res) => {
+app.post('/api/farms/:farmId/activity/:activityId/status', requireFirebaseFarmer, requireActiveFarm, async (req, res) => {
   const { scheduledDate, status } = req.body || {};
   if (!parseDateOnly(scheduledDate)) {
     return res.status(400).json({ success: false, message: 'A valid scheduled date is required.' });
@@ -406,10 +638,7 @@ app.post('/api/farms/:farmId/activity/:activityId/status', requireFirebaseFarmer
   }
 
   try {
-    const farm = await firestoreRepository.getFarmForUser(req.farmerId);
-    if (!farm || farm._id !== req.params.farmId) {
-      return res.status(404).json({ success: false, message: 'Farm information is not configured yet.' });
-    }
+    const farm = req.farmData;
     const crop = farm.cropDetails?.name || farm.crop;
     const protocol = crop ? await firestoreRepository.getCropProtocol(crop, farm.cropDetails?.variety) : null;
     if (!protocol || protocol.enabled !== true) {
@@ -533,56 +762,54 @@ app.get('/api/weather/radar', requireFirebaseFarmer, async (req, res) => {
 });
 
 app.post('/api/profile/update-mobile', requireFirebaseFarmer, async (req, res) => {
-  const verifiedPhone = req.firebaseUser.phone_number;
-  if (typeof verifiedPhone !== 'string' || !/^\+[1-9]\d{7,14}$/.test(verifiedPhone)) {
-    return res.status(400).json({
-      success: false,
-      message: 'The Firebase identity does not contain a verified phone number.'
-    });
-  }
-
+  const mobile = typeof req.body?.mobile === 'string' ? req.body.mobile.trim() : '';
   try {
     const existing = await firestoreRepository.getUser(req.farmerId);
     if (!existing) return res.status(404).json({ success: false, message: 'Farmer profile not found.' });
     await firestoreRepository.createOrUpdateUser(req.farmerId, {
-      phone: verifiedPhone,
-      mobileVerified: true
+      phone: mobile || null,
+      mobileVerified: Boolean(mobile)
     });
-    await getFirebaseAuth().getUser(req.firebaseUid);
-    return res.json({ success: true, message: 'Verified mobile number updated.', mobile: verifiedPhone });
+    return res.json({ success: true, message: 'Mobile number updated.', mobile });
   } catch (error) {
-    console.error('[AgriShield Auth] Verified mobile update failed:', error.code || error.name || 'mobile_update_error');
-    return res.status(503).json({ success: false, message: 'The verified mobile number could not be synchronized. Please retry.' });
+    console.error('[AgriShield Auth] Mobile update failed:', error.code || error.name || 'mobile_update_error');
+    return res.status(503).json({ success: false, message: 'The mobile number could not be updated. Please retry.' });
   }
 });
 
 // 4. Save Farm Profile Endpoint
 app.post('/api/save-farm-profile', requireFirebaseFarmer, async (req, res) => {
+  let createdFarmId = null;
+  let createdOwnership = false;
   try {
     if (!firestoreRepository.isConfigured()) {
       return res.status(503).json({
         success: false,
-        message: 'Farm location could not be saved because Firestore is unavailable. Check the backend Firebase configuration and retry.'
+        code: 'APPLICATION_FIRESTORE_UNAVAILABLE',
+        message: 'Farm location could not be saved because application data storage is unavailable. Your sign-in remains active; retry after the service is configured.'
       });
     }
-    const { farmerName, farm } = req.body;
+    const { farmerName, farm, verifiedMobile } = req.body;
     const userId = req.farmerId;
-    const verifiedMobile = req.firebaseUser.phone_number;
     if (!farmerName || !farmerName.trim()) {
       return res.status(400).json({ success: false, message: 'Farmer name is required' });
     }
-    if (typeof verifiedMobile !== 'string' || !/^\+[1-9]\d{7,14}$/.test(verifiedMobile)) {
-      return res.status(400).json({ success: false, message: 'Verified mobile number is required' });
-    }
 
-    const normalizedMobile = verifiedMobile;
     const storedUser = await firestoreRepository.getUser(userId);
-    if (!storedUser || storedUser.mobileVerified === false ||
-        (storedUser.phone || storedUser.mobile) !== normalizedMobile) {
+    if (!storedUser) {
       return res.status(401).json({
         success: false,
         message: 'Your verified farmer account could not be confirmed. Please sign in again.'
       });
+    }
+
+    const candidateMobile = typeof verifiedMobile === 'string' && verifiedMobile.trim()
+      ? verifiedMobile.trim()
+      : typeof req.body?.mobile === 'string' && req.body.mobile.trim()
+        ? req.body.mobile.trim()
+        : null;
+    if (candidateMobile && candidateMobile !== storedUser.phone) {
+      await firestoreRepository.createOrUpdateUser(userId, { phone: candidateMobile });
     }
 
     // Validate location & boundary
@@ -639,9 +866,15 @@ app.post('/api/save-farm-profile', requireFirebaseFarmer, async (req, res) => {
       (typeof farm?.water === 'string' ? farm.water : farm?.water?.source || farm?.water?.otherSource)
     );
     const submittedLocation = farm?.location || farm?.farmLocation || {};
+    const timezone = resolveFarmTimeZone({
+      ...submittedLocation,
+      latitude,
+      longitude
+    });
     const savedLocation = {
       latitude,
       longitude,
+      timezone,
       displayName: optionalText(submittedLocation.displayName),
       village: optionalText(submittedLocation.village),
       district: optionalText(submittedLocation.district),
@@ -678,18 +911,25 @@ app.post('/api/save-farm-profile', requireFirebaseFarmer, async (req, res) => {
       widthMeters: Math.round(geometry.widthMeters)
     };
 
-    let farmId = farm?._id || `farm-${userId}`;
+    const requestedFarmId = typeof farm?._id === 'string' && farm._id.trim() ? farm._id.trim() : null;
+    if (requestedFarmId && !await firestoreRepository.getOwnedFarm(userId, requestedFarmId)) {
+      return res.status(403).json({
+        success: false,
+        code: 'FARM_ACCESS_DENIED',
+        message: 'This farm cannot be updated from your account.'
+      });
+    }
+    const farmId = requestedFarmId || crypto.randomUUID();
+    const isNewFarm = !requestedFarmId;
     const normalizedBoundary = geometry.points;
 
     await firestoreRepository.createOrUpdateUser(userId, {
       name: farmerName.trim(),
-      phone: normalizedMobile,
-      mobileVerified: true
+      ...(candidateMobile !== null ? { phone: candidateMobile, mobileVerified: Boolean(candidateMobile) } : {})
     });
 
-    const existingFarm = await firestoreRepository.getFarmForUser(userId);
-    farmId = existingFarm?._id || farmId;
     await firestoreRepository.saveFarm(userId, farmId, {
+      name: optionalText(farm?.name) || 'My Farm',
       location: savedLocation,
       boundary: normalizedBoundary,
       area,
@@ -698,6 +938,16 @@ app.post('/api/save-farm-profile', requireFirebaseFarmer, async (req, res) => {
       soilDetails,
       waterSource
     });
+    if (isNewFarm) createdFarmId = farmId;
+    await firestoreRepository.setFarmOwnership(userId, farmId, {
+      name: optionalText(farm?.name) || 'My Farm',
+      locationSummary: savedLocation.displayName,
+      areaSummary: area.acres
+    });
+    if (isNewFarm) createdOwnership = true;
+    if (!await firestoreRepository.setUserActiveFarmId(userId, farmId)) {
+      throw new Error('The farm ownership relationship could not be activated.');
+    }
 
     console.log('[AgriShield] Farmer profile and farm saved successfully.');
 
@@ -705,8 +955,18 @@ app.post('/api/save-farm-profile', requireFirebaseFarmer, async (req, res) => {
     const savedData = {
       userId,
       farmerName: farmerName.trim(),
-      verifiedMobile,
+      verifiedMobile: candidateMobile || storedUser.phone || '',
+      mobile: candidateMobile || storedUser.phone || '',
+      activeFarmId: farmId,
+      farms: (await firestoreRepository.getFarmerFarms(userId)).map((ownedFarm) => ({
+        farmId: ownedFarm._id,
+        name: ownedFarm.name || 'My Farm',
+        areaAcres: ownedFarm.area?.acres || null,
+        locationSummary: ownedFarm.farmLocation?.displayName || null
+      })),
+      applicationDataAvailable: true,
       farm: {
+        name: optionalText(farm?.name) || 'My Farm',
         farmLocation: savedLocation,
         _id: farmId,
         location: {
@@ -743,10 +1003,19 @@ app.post('/api/save-farm-profile', requireFirebaseFarmer, async (req, res) => {
       data: savedData
     });
   } catch (error) {
-    console.error('[AgriShield] Failed to save farm profile:', error);
-    return res.status(500).json({
+    if (createdFarmId) {
+      try {
+        if (createdOwnership) await firestoreRepository.deleteFarmOwnership(req.farmerId, createdFarmId);
+        await firestoreRepository.deleteFarmForUser(req.farmerId, createdFarmId);
+      } catch (cleanupError) {
+        console.error('[AgriShield Farm Setup] Incomplete farm rollback failed:', cleanupError.code || cleanupError.name || 'farm_rollback_error');
+      }
+    }
+    console.error('[AgriShield] Failed to save farm profile:', error.code || error.name || 'farm_save_error');
+    return res.status(error.statusCode || 503).json({
       success: false,
-      message: 'Unable to save your farm details right now. Please try again.'
+      code: error.code || 'FARM_SAVE_FAILED',
+      message: error.statusCode ? error.message : 'Unable to save your farm details right now. Please try again.'
     });
   }
 });
@@ -759,90 +1028,38 @@ app.get('/api/farm-profile/:userId', requireFirebaseFarmer, async (req, res) => 
   }
 
   try {
-    if (!firestoreRepository.isConfigured()) {
-      return res.status(503).json({
-        success: false,
-        message: 'Farm profile is unavailable because Firestore is disconnected. Check the backend Firebase configuration and network access.'
-      });
-    }
-    const [userDoc, farmDoc] = await Promise.all([
-      firestoreRepository.getFarmer(userId),
-      firestoreRepository.getFarmForUser(userId)
-    ]);
-
-    if (!userDoc && !farmDoc) {
+    const responseData = await getFarmerProfile(userId, req.farmId);
+    if (!responseData) {
       return res.status(404).json({ success: false, message: 'Farm profile not found in Firestore' });
     }
-
-    const boundaryPoints = farmDoc?.farmBoundary || [];
-    const formattedPoints = boundaryPoints.map(p => (Array.isArray(p) ? p : [p.lat, p.lng]));
-
-    const responseData = {
-      userId,
-      farmerName: userDoc?.name || '',
-      verifiedMobile: userDoc?.mobile || '',
-      farm: {
-        _id: farmDoc?._id || `farm-${userId}`,
-        location: farmDoc?.farmLocation ? {
-          lat: farmDoc.farmLocation.latitude,
-          lng: farmDoc.farmLocation.longitude,
-          displayName: farmDoc.farmLocation.displayName || null,
-          village: farmDoc.farmLocation.village || null,
-          district: farmDoc.farmLocation.district || null,
-          state: farmDoc.farmLocation.state || null,
-          country: farmDoc.farmLocation.country || null
-        } : null,
-        boundary: {
-          points: formattedPoints,
-          areaAcres: farmDoc?.area?.acres || null,
-          areaSqMeters: farmDoc?.area?.sqMeters || 0,
-          perimeterMeters: farmDoc?.area?.perimeterMeters || 0,
-          lengthMeters: farmDoc?.area?.lengthMeters || 0,
-          widthMeters: farmDoc?.area?.widthMeters || 0
-        },
-        area: farmDoc?.area || {},
-        crop: farmDoc?.cropDetails?.name || farmDoc?.crop || null,
-        variety: farmDoc?.cropDetails?.variety || null,
-        soilType: farmDoc?.soilDetails?.type || null,
-        cropDetails: farmDoc?.cropDetails || null,
-        soilDetails: farmDoc?.soilDetails || null,
-        waterSource: farmDoc?.waterSource || null,
-        water: {
-          source: farmDoc?.waterSource || null,
-          otherSource: farmDoc?.waterSource || null
-        }
-      }
-    };
-
     return res.json({ success: true, data: responseData });
   } catch (error) {
-    console.error('[AgriShield] Error fetching farm profile:', error);
-    return res.status(500).json({
+    console.error('[AgriShield] Error fetching farm profile:', error.code || error.name || 'farm_profile_error');
+    return res.status(error.statusCode || 503).json({
       success: false,
+      code: error.code || 'FARM_DATA_UNAVAILABLE',
       message: 'Unable to retrieve farm details right now. Please try again.'
     });
   }
 });
 
 // 6. Farm Twin 3D State Endpoint
-app.get('/api/farms/:id/farm-twin', requireFirebaseFarmer, async (req, res) => {
-  const { id } = req.params;
-
+app.get('/api/farms/:id/farm-twin', requireFirebaseFarmer, requireActiveFarm, async (req, res) => {
   try {
-    if (!firestoreRepository.isConfigured()) {
-      return res.status(503).json({ success: false, message: 'Farm data is unavailable because Firestore is disconnected. Check the backend Firebase configuration and network access.' });
-    }
-    const farmDoc = await firestoreRepository.getFarmForUser(req.farmerId);
-    if (!farmDoc || ![farmDoc._id, `farm-${req.farmerId}`, req.farmerId].includes(id)) {
-      return res.status(404).json({ success: false, message: 'Farm data is not available for this account.' });
-    }
+    const farmDoc = req.farmData;
 
     let weatherContext = null;
     try {
       weatherContext = await weatherService.getCurrentWeather(farmDoc?.farmLocation);
     } catch (error) {
       console.warn('[AgriShield Farm Twin] Weather could not be retrieved:', error.message);
-      weatherContext = { available: false, status: 'unavailable', data: null, sources: [] };
+      weatherContext = {
+        available: false,
+        status: 'unavailable',
+        data: null,
+        sources: [],
+        timezone: resolveFarmTimeZone(farmDoc?.farmLocation || {})
+      };
     }
     const twinState = getFarmEnvironmentState(farmDoc, {
       weatherData: weatherContext
@@ -853,10 +1070,10 @@ app.get('/api/farms/:id/farm-twin', requireFirebaseFarmer, async (req, res) => {
       data: twinState
     });
   } catch (error) {
-    console.error('[AgriShield] Failed to generate Farm Twin:', error);
-    return res.status(500).json({
+    console.error('[AgriShield] Failed to generate Farm Twin:', error.code || error.name || 'farm_twin_error');
+    return res.status(503).json({
       success: false,
-      message: 'Unable to calibrate Farm Twin right now. Reverting to safe baseline.'
+      message: 'Unable to load this farm’s Farm Twin right now. Please retry.'
     });
   }
 });
@@ -869,17 +1086,23 @@ app.use('/api/ai', aiRouter);
 app.use('/api/support', require('./routes/support'));
 
 app.listen(PORT, () => {
-  console.log(`AgriShield backend running on http://localhost:${PORT}`);
+  console.log(`AgriShield backend listening on port ${PORT}`);
   const status = providerFactory.getStatus();
   void (async () => {
     const firebaseAdmin = getFirebaseAdminRuntimeStatus();
-    const firestore = await firestoreRepository.checkHealth();
+    const [privateFirestore, applicationFirestore] = await Promise.all([
+      firestoreRepository.checkPrivateHealth(),
+      firestoreRepository.checkHealth()
+    ]);
     console.log('[AgriShield Configuration]', {
       aiProvider: status.provider,
       aiConfigured: status.isConfigured,
-      firebaseAdminConfigured: firebaseAdmin.configured,
-      firestoreConfigured: firestore.configured,
-      firestoreConnected: firestore.connected,
+      privateFirebaseProjectId: firebaseAdmin.privateProject.projectId,
+      privateFirebaseConfigured: firebaseAdmin.privateProject.configured,
+      privateFirestoreConnected: privateFirestore.connected,
+      applicationFirebaseProjectId: firebaseAdmin.applicationProject.projectId,
+      applicationFirebaseConfigured: firebaseAdmin.applicationProject.configured,
+      applicationFirestoreConnected: applicationFirestore.connected,
       ttsConfigured: status.ttsConfigured,
       weatherProvider: status.weatherProvider
     });

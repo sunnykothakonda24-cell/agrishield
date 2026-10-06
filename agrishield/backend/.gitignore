@@ -5,3 +5,14 @@ node_modules/
 *firebase-adminsdk*.json
 firebase-service-account*.json
 service-account*.json
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+build/
+coverage/
+*.log
+firebase-service-account*.json
+service-account*.json
+google-cloud-*.json

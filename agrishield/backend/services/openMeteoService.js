@@ -29,21 +29,31 @@ function readNumber(value) {
   return Number.isFinite(value) ? value : null;
 }
 
-function parseProviderTime(value) {
-  const timestamp = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : `${value}Z`;
-  return new Date(timestamp);
+function normalizeRequestedTimezone(timezone) {
+  if (typeof timezone !== 'string' || !timezone.trim()) return 'auto';
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: timezone }).format();
+    return timezone;
+  } catch {
+    return 'auto';
+  }
 }
 
-function readHourly(payload, startTime) {
+function parseProviderTime(value, utcOffsetSeconds = 0) {
+  if (/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return new Date(value);
+  return new Date(Date.parse(`${value}Z`) - utcOffsetSeconds * 1000);
+}
+
+function readHourly(payload, startTime, utcOffsetSeconds) {
   const times = payload.hourly?.time || [];
   const firstIndex = Math.max(0, times.findIndex((time) => {
-    const date = parseProviderTime(time);
+    const date = parseProviderTime(time, utcOffsetSeconds);
     return Number.isFinite(date.getTime()) && date.getTime() >= startTime;
   }));
   return times.slice(firstIndex).map((time, index) => {
     const sourceIndex = firstIndex + index;
     return {
-      time: parseProviderTime(time).toISOString(),
+      time: parseProviderTime(time, utcOffsetSeconds).toISOString(),
       temperature: readNumber(payload.hourly?.temperature_2m?.[sourceIndex]),
       apparentTemperature: readNumber(payload.hourly?.apparent_temperature?.[sourceIndex]),
       humidity: readNumber(payload.hourly?.relative_humidity_2m?.[sourceIndex]),
@@ -71,7 +81,8 @@ function normalizeResponse(payload, requestedLocation, retrievedAt = new Date())
     throw new Error('Open-Meteo returned no current weather data.');
   }
 
-  const currentTime = parseProviderTime(payload.current.time);
+  const utcOffsetSeconds = Number(payload.utc_offset_seconds) || 0;
+  const currentTime = parseProviderTime(payload.current.time, utcOffsetSeconds);
   if (!Number.isFinite(currentTime.getTime())) {
     throw new Error('Open-Meteo returned an invalid current weather timestamp.');
   }
@@ -95,14 +106,32 @@ function normalizeResponse(payload, requestedLocation, retrievedAt = new Date())
     windDirection: readNumber(payload.current.wind_direction_10m),
     windGusts: readNumber(payload.current.wind_gusts_10m),
     weatherCode: readNumber(payload.current.weather_code),
-    cloudCover: readNumber(payload.current.cloud_cover),
     et0: readNumber(payload.current.et0_fao_evapotranspiration),
     vapourPressureDeficit: readNumber(payload.current.vapour_pressure_deficit),
-    solarRadiation: readNumber(payload.current.shortwave_radiation)
+    solarRadiation: currentHourIndex < 0
+      ? null
+      : readNumber(payload.hourly?.shortwave_radiation?.[currentHourIndex]),
+    isDay: payload.current.is_day === 0 || payload.current.is_day === 1
+      ? payload.current.is_day === 1
+      : null
   };
-  const hourly = readHourly(payload, currentTime.getTime());
+  const hourly = readHourly(payload, currentTime.getTime(), utcOffsetSeconds);
   const daily = (payload.daily?.time || []).map((date, index) => ({
     date,
+    sunrise: payload.daily?.sunrise?.[index]
+      ? parseProviderTime(payload.daily.sunrise[index], utcOffsetSeconds).toISOString()
+      : null,
+    sunset: payload.daily?.sunset?.[index]
+      ? parseProviderTime(payload.daily.sunset[index], utcOffsetSeconds).toISOString()
+      : null,
+    daylightDurationSeconds: readNumber(payload.daily?.daylight_duration?.[index]),
+    moonrise: payload.daily?.moonrise?.[index]
+      ? parseProviderTime(payload.daily.moonrise[index], utcOffsetSeconds).toISOString()
+      : null,
+    moonset: payload.daily?.moonset?.[index]
+      ? parseProviderTime(payload.daily.moonset[index], utcOffsetSeconds).toISOString()
+      : null,
+    moonPhase: readNumber(payload.daily?.moon_phase?.[index]),
     temperatureMax: readNumber(payload.daily?.temperature_2m_max?.[index]),
     temperatureMin: readNumber(payload.daily?.temperature_2m_min?.[index]),
     precipitationProbabilityMax: readNumber(payload.daily?.precipitation_probability_max?.[index]),
@@ -127,6 +156,8 @@ function normalizeResponse(payload, requestedLocation, retrievedAt = new Date())
     source: 'open-meteo',
     latitude,
     longitude,
+    timezone: payload.timezone || requestedLocation.timezone || null,
+    utcOffsetSeconds,
     retrievedAt: retrievedAt.toISOString(),
     timestamp: current.time,
     current,
@@ -178,14 +209,15 @@ function cacheSet(key, value) {
   cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
-async function fetchForecast(locations, forecastDays = 7) {
+async function fetchForecast(locations, forecastDays = 7, timezone) {
   if (!Array.isArray(locations) || !locations.length) {
     throw new TypeError('At least one location is required for a weather forecast.');
   }
   const days = Math.max(1, Math.min(Math.floor(Number(forecastDays) || 7), 7));
+  const requestedTimezone = normalizeRequestedTimezone(timezone);
   const normalized = locations.map(({ latitude, longitude }) => normalizeCoordinates(latitude, longitude));
-  const cacheKey = `${days}:${normalized.map(({ latitude, longitude }) =>
-    `${latitude.toFixed(4)},${longitude.toFixed(4)}`
+  const cacheKey = `${days}:${requestedTimezone}:${normalized.map(({ latitude, longitude }) =>
+    `${latitude},${longitude}`
   ).join(';')}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
@@ -196,7 +228,7 @@ async function fetchForecast(locations, forecastDays = 7) {
   url.searchParams.set('current', [
     'temperature_2m', 'apparent_temperature', 'relative_humidity_2m', 'precipitation', 'rain',
     'showers', 'weather_code', 'cloud_cover', 'cloud_cover_low', 'cloud_cover_mid',
-    'cloud_cover_high', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m'
+    'cloud_cover_high', 'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m', 'is_day'
   ].join(','));
   url.searchParams.set('hourly', [
     'temperature_2m', 'apparent_temperature', 'relative_humidity_2m', 'precipitation',
@@ -208,10 +240,11 @@ async function fetchForecast(locations, forecastDays = 7) {
   url.searchParams.set('daily', [
     'temperature_2m_max', 'temperature_2m_min',
     'precipitation_probability_max', 'precipitation_sum', 'weather_code',
-    'wind_speed_10m_max', 'et0_fao_evapotranspiration'
+    'wind_speed_10m_max', 'et0_fao_evapotranspiration',
+    'sunrise', 'sunset', 'daylight_duration', 'moonrise', 'moonset', 'moon_phase'
   ].join(','));
   url.searchParams.set('forecast_days', String(days));
-  url.searchParams.set('timezone', 'GMT');
+  url.searchParams.set('timezone', requestedTimezone);
 
   const response = await fetch(url, { signal: AbortSignal.timeout(12000) });
   if (!response.ok) {
@@ -223,13 +256,16 @@ async function fetchForecast(locations, forecastDays = 7) {
     throw new Error('Open-Meteo returned an unexpected number of location forecasts.');
   }
   const retrievedAt = new Date();
-  const result = entries.map((entry, index) => normalizeResponse(entry, normalized[index], retrievedAt));
+  const result = entries.map((entry, index) => normalizeResponse({
+    ...entry,
+    timezone: entry.timezone || (requestedTimezone === 'auto' ? null : requestedTimezone)
+  }, normalized[index], retrievedAt));
   cacheSet(cacheKey, result);
   return result;
 }
 
-async function getForecast(latitude, longitude, forecastDays = 7) {
-  const [weather] = await fetchForecast([{ latitude, longitude }], forecastDays);
+async function getForecast(latitude, longitude, forecastDays = 7, timezone) {
+  const [weather] = await fetchForecast([{ latitude, longitude }], forecastDays, timezone);
   return weather;
 }
 

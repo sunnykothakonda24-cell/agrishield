@@ -28,7 +28,10 @@ class ConversationService {
           location: null,
           activeIssue: null,
           symptoms: [],
-          lastCategory: null
+          lastCategory: null,
+          farmerReportedCropAgeDays: null,
+          farmerReportedPlantingDate: null,
+          farmerReportedWaterSource: null
         },
         summary: '',
         messages: []
@@ -110,13 +113,36 @@ class ConversationService {
       session.context.activeIssue = text.trim().slice(0, 240);
       session.context.symptoms = [...new Set([...session.context.symptoms, text.trim().slice(0, 120)])].slice(-5);
     }
+
+    const cropAgeMatch = text.match(
+      /(?:crop|paddy|rice|field|plant|పంట|వరి|खेत|फसल)[^\d]{0,40}(\d{1,3})\s*(?:days?|రోజుల|दिन)(?:\s*(?:old|ago|వయస్సు|వయసు|पुराना|पहले))?/i
+    ) || text.match(/\b(\d{1,3})\s*(?:days?|రోజుల|दिन)\s*(?:old|ago|పాత|पुराना|पहले)\b/i);
+    if (cropAgeMatch) session.context.farmerReportedCropAgeDays = Number(cropAgeMatch[1]);
+
+    const plantingDateMatch = text.match(
+      /(?:planted|sown|transplanted|నాటిన|విత్తిన|बोया|रोपा)[^\d]{0,24}(\d{4}-\d{2}-\d{2})/i
+    );
+    if (plantingDateMatch) session.context.farmerReportedPlantingDate = plantingDateMatch[1];
+
+    const waterSourceNames = '(canal|borewell|bore\\s*well|open\\s*well|rain[ -]?fed|river|tank|drip|కాలువ|బోర్‌వెల్|బోరు|బావి|विहीर|नहर|बोरवेल|कुआँ)';
+    const changedWaterSource = text.match(new RegExp(
+      `(?:changed|switched|చేర్చాను|మార్చాను|बदला|बदलकर)[\\s\\S]{0,40}?${waterSourceNames}[\\s\\S]{0,24}?(?:to|గా|కు|में)\\s*${waterSourceNames}`,
+      'i'
+    ));
+    const currentWaterSource = changedWaterSource?.[2] || text.match(new RegExp(
+      `(?:use|using|water source is|నీటి వనరు|నీరు|पानी का स्रोत|सिंचाई)[\\s\\S]{0,24}?${waterSourceNames}`,
+      'i'
+    ))?.[1];
+    if (currentWaterSource) {
+      session.context.farmerReportedWaterSource = currentWaterSource.trim();
+    }
   }
 
   restoreHistory(conversationId, history = []) {
     const session = this.getSession(conversationId);
     if (session.messages.length > 0 || !Array.isArray(history)) return;
 
-    history.slice(-12).forEach((message) => {
+    history.slice(-20).forEach((message) => {
       if (!['user', 'assistant'].includes(message?.role) || typeof message.content !== 'string') return;
       const content = message.content.trim().slice(0, 4000);
       if (content) this.addMessage(conversationId, { role: message.role, content });

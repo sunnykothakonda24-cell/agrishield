@@ -1,11 +1,27 @@
 import { getFirebaseAuth } from './firebase';
 import { signOut } from 'firebase/auth';
+import { resolveApiBase } from './apiBase';
+import {
+  createImageUploadFormData,
+  createVoiceUploadFormData,
+  toSpeechLanguageCode
+} from './aiMedia';
 
-const API_HOST = typeof window === 'undefined' ? 'localhost' : window.location.hostname;
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || `http://${API_HOST}:5000/api`).replace(/\/+$/, '');
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+let activeFarmId = null;
 
-const fetchWithFirebaseAuth = async (url, options = {}, { forceRefresh = false } = {}) => {
+function validateApiBase() {
+  return resolveApiBase(API_BASE, import.meta.env.PROD);
+}
+
+export const setActiveFarmId = (farmId) => {
+  activeFarmId = typeof farmId === 'string' && farmId.trim() ? farmId.trim() : null;
+};
+
+const fetchWithFirebaseAuth = async (url, options = {}, { forceRefresh = false, onRequestStart } = {}) => {
+  validateApiBase();
   const headers = new Headers(options.headers || {});
+  if (activeFarmId) headers.set('X-Farm-Id', activeFarmId);
   try {
     const user = getFirebaseAuth().currentUser;
     if (user) headers.set('Authorization', `Bearer ${await user.getIdToken(forceRefresh)}`);
@@ -13,6 +29,7 @@ const fetchWithFirebaseAuth = async (url, options = {}, { forceRefresh = false }
     if (!error.message?.includes('Firebase web authentication is not configured')) throw error;
   }
   try {
+    onRequestStart?.();
     return await fetch(url, { ...options, headers });
   } catch (cause) {
     if (cause.name === 'AbortError') throw cause;
@@ -79,11 +96,27 @@ export const getCurrentSession = async (farmerName = '') => {
         : 'ACCOUNT_SYNC_FAILED');
     throw error;
   }
+  setActiveFarmId(data.data.activeFarmId || data.data.farm?._id || null);
+  return data.data;
+};
+
+export const selectActiveFarm = async (farmId) => {
+  const response = await fetchWithFirebaseAuth(`${API_BASE}/auth/active-farm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ farmId })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success || !data.data) {
+    throw new Error(data.message || 'The selected farm could not be loaded.');
+  }
+  setActiveFarmId(data.data.activeFarmId);
   return data.data;
 };
 
 export const logoutSession = async () => {
   await signOut(getFirebaseAuth());
+  setActiveFarmId(null);
 };
 
 export const deleteCurrentAccount = async () => {
@@ -126,11 +159,11 @@ export const submitSupportFeedback = ({ rating, message }) => supportRequest('fe
   body: JSON.stringify({ rating, message })
 });
 
-export const updateMobileNumber = async () => {
+export const updateMobileNumber = async (mobile = '') => {
   const response = await fetchWithFirebaseAuth(`${API_BASE}/profile/update-mobile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
+    body: JSON.stringify({ mobile })
   });
   const data = await response.json();
   if (!response.ok || !data.success) {
@@ -159,6 +192,7 @@ export const saveFarmProfile = async (profileData) => {
   if (!response.ok) {
     throw new Error(data.message || 'Failed to save farm profile');
   }
+  setActiveFarmId(data.data?.activeFarmId || data.data?.farm?._id || activeFarmId);
   return data;
 };
 
@@ -269,8 +303,21 @@ export const getRecentRadarFrame = async ({ signal } = {}) => {
 };
 
 // ==========================================
-// AGRISHIELD-AI — PHASE 1 MULTIMODAL AI API CLIENT
+// AgriShield multimodal AI API client
 // ==========================================
+
+function mediaDiagnostic(stage, details = {}) {
+  if (!import.meta.env.DEV) return;
+  if (stage.startsWith('tts') && typeof window !== 'undefined') {
+    window.__AGRISHIELD_TTS_TIMINGS__ ||= [];
+    window.__AGRISHIELD_TTS_TIMINGS__.push({
+      stage,
+      monotonicMs: globalThis.performance?.now?.() ?? Date.now(),
+      ...details
+    });
+  }
+  console.debug(`[AgriShield media] ${stage}`, details);
+}
 
 export const sendMessageToAI = async ({
   message,
@@ -278,47 +325,63 @@ export const sendMessageToAI = async ({
   conversationId = 'default-session',
   history = [],
   image = null,
-  signal = null
+  inputType = image ? 'image' : 'text',
+  signal = null,
+  requestId = null,
+  onUploadComplete = () => {}
 }) => {
   try {
     const payload = {
-        message,
-        language,
-        conversationId,
-        history
+      message,
+      language,
+      languageCode: toSpeechLanguageCode(language, { preserveAuto: true }),
+      inputType,
+      conversationId,
+      history,
+      ...(requestId ? { requestId } : {})
     };
-    let requestBody = JSON.stringify(payload);
-    let headers = { 'Content-Type': 'application/json' };
 
     if (image) {
-      const formData = new FormData();
-      Object.entries(payload).forEach(([key, value]) => {
-        formData.append(key, typeof value === 'string' ? value : JSON.stringify(value));
-      });
+      let imageForUpload = image;
       if (image.file instanceof Blob) {
-        formData.append('imageFile', image.file, image.name || 'farm-image');
+        imageForUpload = image;
       } else if (typeof image === 'string' && image.startsWith('data:image/')) {
         const imageBlob = await fetch(image).then((response) => response.blob());
-        formData.append('imageFile', imageBlob, 'farm-image');
-      } else {
-        throw new Error('The selected image could not be attached. Please choose it again.');
+        imageForUpload = { file: imageBlob, name: 'farm-image', type: imageBlob.type };
       }
-      requestBody = formData;
-      headers = {};
+      const formData = createImageUploadFormData(payload, imageForUpload);
+      mediaDiagnostic('imageUploadStarted', {
+        byteSize: imageForUpload.file.size,
+        mimeType: imageForUpload.file.type
+      });
+      const response = await sendAuthenticatedMultipart(`${API_BASE}/ai/chat`, formData, {
+        signal,
+        onUploadComplete
+      });
+      mediaDiagnostic('imageUploadResponse', { status: response.status });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        const error = new Error(data?.error?.message || data?.reply || data?.message || 'Failed to get AI response');
+        error.code = data?.error?.code || 'AI_PROVIDER_ERROR';
+        error.status = response.status;
+        error.imageMessageId = data?.imageMessageId || null;
+        error.imageUrl = data?.imageUrl || null;
+        throw error;
+      }
+      return data;
     }
 
     const response = await fetchWithFirebaseAuth(`${API_BASE}/ai/chat`, {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       signal,
-      body: requestBody
+      body: JSON.stringify(payload)
     });
-
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.success) {
-      const errorMsg = data?.error?.message || data?.reply || data?.message || 'Failed to get AI response';
-      const error = new Error(errorMsg);
+      const error = new Error(data?.error?.message || data?.reply || data?.message || 'Failed to get AI response');
       error.code = data?.error?.code || 'AI_PROVIDER_ERROR';
+      error.status = response.status;
       throw error;
     }
     return data;
@@ -332,35 +395,154 @@ export const sendMessageToAI = async ({
   }
 };
 
-export const transcribeVoice = async ({ audioBlob, audioData, mimeType = 'audio/webm', language = 'auto' }) => {
+function sendAuthenticatedMultipart(url, body, { signal, onUploadComplete }) {
+  return new Promise((resolve, reject) => {
+    let xhr;
+    let settled = false;
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const abort = () => xhr?.abort();
+
+    try {
+      validateApiBase();
+      xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      xhr.timeout = 120000;
+      if (activeFarmId) xhr.setRequestHeader('X-Farm-Id', activeFarmId);
+      const user = getFirebaseAuth().currentUser;
+      if (signal?.aborted) {
+        fail(new DOMException('The operation was aborted.', 'AbortError'));
+        return;
+      }
+      signal?.addEventListener('abort', abort, { once: true });
+      Promise.resolve(user?.getIdToken())
+        .then((token) => {
+          if (settled || signal?.aborted) return;
+          if (!token) {
+            const error = new Error('Sign in with Firebase to send a crop image.');
+            error.code = 'AUTH_NOT_AUTHENTICATED';
+            throw error;
+          }
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+          xhr.upload.addEventListener('load', () => onUploadComplete());
+          xhr.addEventListener('load', () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve({
+              ok: xhr.status >= 200 && xhr.status < 300,
+              status: xhr.status,
+              json: async () => {
+                try { return JSON.parse(xhr.responseText); } catch { return {}; }
+              }
+            });
+          });
+          xhr.addEventListener('error', () => {
+            const error = new Error('The AgriShield API could not be reached.');
+            error.code = 'API_NETWORK_ERROR';
+            fail(error);
+          });
+          xhr.addEventListener('timeout', () => {
+            const error = new Error('The image request timed out. Please try again.');
+            error.code = 'API_TIMEOUT';
+            fail(error);
+          });
+          xhr.addEventListener('abort', () => {
+            fail(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+          xhr.send(body);
+        })
+        .catch(fail);
+    } catch (error) {
+      fail(error);
+    }
+  });
+}
+
+export const retryAIImageAnalysis = async ({ conversationId, messageId, language = 'auto' }) => {
+  const response = await fetchWithFirebaseAuth(
+    `${API_BASE}/ai/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/retry`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ languageCode: toSpeechLanguageCode(language, { preserveAuto: true }) })
+    }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success) {
+    const error = new Error(data?.error?.message || data?.message || 'Image analysis is temporarily unavailable.');
+    error.code = data?.error?.code || 'IMAGE_ANALYSIS_UNAVAILABLE';
+    error.status = response.status;
+    error.imageMessageId = data?.imageMessageId || null;
+    error.imageUrl = data?.imageUrl || null;
+    throw error;
+  }
+  return data;
+};
+
+export const transcribeVoice = async ({
+  audioBlob,
+  audioData,
+  mimeType = 'audio/webm',
+  language = 'auto',
+  durationSeconds,
+  signal
+}) => {
   try {
     let body;
     let headers = {};
 
     if (audioBlob) {
-      const formData = new FormData();
-      const extension = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
-      formData.append('audioFile', audioBlob, `voice.${extension}`);
-      formData.append('language', language);
-      body = formData;
+      body = createVoiceUploadFormData({ audioBlob, mimeType, language, durationSeconds });
     } else {
       headers['Content-Type'] = 'application/json';
-      body = JSON.stringify({ audioData, mimeType, language });
+      body = JSON.stringify({
+        audioData,
+        mimeType,
+        languageCode: toSpeechLanguageCode(language, { preserveAuto: true }),
+        durationSeconds
+      });
     }
 
+    mediaDiagnostic('voiceUploadStarted', {
+      byteSize: audioBlob?.size,
+      mimeType,
+      languageCode: toSpeechLanguageCode(language)
+    });
     const response = await fetchWithFirebaseAuth(`${API_BASE}/ai/transcribe`, {
       method: 'POST',
       headers,
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(65000)])
+        : AbortSignal.timeout(65000),
       body
     });
+    mediaDiagnostic('voiceUploadResponse', { status: response.status });
 
     const data = await response.json();
     if (!response.ok || !data.success) {
-      throw new Error(data?.error?.message || 'Transcription failed');
+      const error = new Error(data?.error?.message || 'Transcription failed');
+      error.status = response.status;
+      error.code = data?.error?.code;
+      throw error;
     }
+    mediaDiagnostic('transcriptReceived', { received: Boolean(data?.text?.trim()) });
     return data;
   } catch (err) {
-    console.warn('[AgriShield Voice] Transcription request error:', err.message);
+    if (import.meta.env.DEV) {
+      console.warn('[AgriShield media] voiceUploadFailed', {
+        name: err.name,
+        code: err.code,
+        status: err.status
+      });
+    }
     throw err;
   }
 };
@@ -369,11 +551,67 @@ export const speakVoice = async ({ text, language = 'en' }) => {
   const response = await fetchWithFirebaseAuth(`${API_BASE}/ai/speak`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, language })
+    body: JSON.stringify({ text, languageCode: toSpeechLanguageCode(language) })
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.success) {
-    throw new Error(data?.error?.message || 'Speech synthesis is unavailable right now.');
+    const error = new Error(data?.error?.message || 'Speech synthesis is unavailable right now.');
+    error.voiceAvailable = data?.voiceAvailable === false;
+    error.code = data?.error?.code;
+    throw error;
+  }
+  return data;
+};
+
+export const speakVoiceStream = ({ text, language = 'en', signal }) => {
+  const clientStartedAt = Date.now();
+  mediaDiagnostic('ttsRequestStarted', { language: toSpeechLanguageCode(language) });
+  return fetchWithFirebaseAuth(`${API_BASE}/ai/speak/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(import.meta.env.DEV
+        ? { 'X-AgriShield-TTS-Client-Started-At': String(clientStartedAt) }
+        : {})
+    },
+    body: JSON.stringify({ text, languageCode: toSpeechLanguageCode(language) }),
+    signal
+  }, {
+    onRequestStart: () => mediaDiagnostic('ttsHttpRequestStarted', { language: toSpeechLanguageCode(language) })
+  });
+};
+
+export const getLiveVoiceToken = async ({ language, farmId }) => {
+  const response = await fetchWithFirebaseAuth(`${API_BASE}/ai/live-token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(farmId ? { 'X-Farm-Id': farmId } : {}) },
+    body: JSON.stringify({ languageCode: toSpeechLanguageCode(language) })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success || !data.token || !data.setup) {
+    throw new Error(data?.error?.message || 'Live Voice is unavailable right now.');
+  }
+  return data;
+};
+
+export const saveLiveVoiceMessage = async ({ conversationId, role, message, language, farmId }) => {
+  const response = await fetchWithFirebaseAuth(`${API_BASE}/ai/live-message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(farmId ? { 'X-Farm-Id': farmId } : {}) },
+    body: JSON.stringify({ conversationId, role, message, languageCode: toSpeechLanguageCode(language) })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success) {
+    throw new Error(data.message || 'The Live Voice conversation could not be saved.');
+  }
+  return data;
+};
+
+export const getVoiceConfig = async () => {
+  const response = await fetchWithFirebaseAuth(`${API_BASE}/voice-config`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success || !Number.isInteger(data.maxRecordingSeconds)) {
+    throw new Error(data?.error?.message || 'Voice recording settings could not be loaded.');
   }
   return data;
 };

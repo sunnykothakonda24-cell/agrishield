@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bell,
   Camera,
@@ -20,9 +21,6 @@ import {
   Trash2,
   UserRound
 } from 'lucide-react';
-import { RecaptchaVerifier, reauthenticateWithPhoneNumber } from 'firebase/auth';
-import { getFirebaseAuth } from '../services/firebase';
-import { logFirebaseAuthError } from '../services/firebaseAuthErrors';
 import { updateAppPreferences } from '../services/appPreferences';
 import { useAppPreferences } from '../services/useAppPreferences';
 import { translate } from '../i18n';
@@ -180,26 +178,11 @@ function PreferencePicker({ mode, value, language, onSelect, onClose }) {
   );
 }
 
-function maskPhone(phone) {
-  if (typeof phone !== 'string' || !phone) return '';
-  return `${phone.slice(0, 4)}${'*'.repeat(Math.max(phone.length - 8, 0))}${phone.slice(-4)}`;
-}
-
-function AccountDeletionDialog({ phone, language, onClose, onDeleted }) {
+function AccountDeletionDialog({ language, onClose, onDeleted }) {
   const t = (key) => translate(language, key);
   const [step, setStep] = useState('warning');
-  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const captchaContainerRef = useRef(null);
-  const verifierRef = useRef(null);
-  const confirmationRef = useRef(null);
-  const userRef = useRef(null);
-
-  useEffect(() => () => {
-    verifierRef.current?.clear();
-    verifierRef.current = null;
-  }, []);
 
   useEffect(() => {
     if (busy) return undefined;
@@ -209,57 +192,6 @@ function AccountDeletionDialog({ phone, language, onClose, onDeleted }) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [busy, onClose, step]);
-
-  const sendCode = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      const auth = getFirebaseAuth();
-      const user = auth.currentUser;
-      if (!user || !user.phoneNumber || user.phoneNumber !== phone) {
-        throw new Error(t('delete.requestFailed'));
-      }
-      if (!captchaContainerRef.current) throw new Error(t('delete.requestFailed'));
-      verifierRef.current?.clear();
-      verifierRef.current = new RecaptchaVerifier(auth, captchaContainerRef.current, { size: 'invisible' });
-      userRef.current = user;
-      confirmationRef.current = await reauthenticateWithPhoneNumber(user, user.phoneNumber, verifierRef.current);
-      setStep('otp');
-    } catch (sendError) {
-      logFirebaseAuthError(sendError, 'account deletion phone reauthentication');
-      setError(t('delete.requestFailed'));
-      verifierRef.current?.clear();
-      verifierRef.current = null;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verifyCode = async (event) => {
-    event.preventDefault();
-    if (!/^\d{6}$/.test(code) || busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      if (!confirmationRef.current || !userRef.current) throw new Error(t('delete.expiredCode'));
-      await confirmationRef.current.confirm(code);
-      confirmationRef.current = null;
-      verifierRef.current?.clear();
-      verifierRef.current = null;
-      setStep('final');
-    } catch (verifyError) {
-      logFirebaseAuthError(verifyError, 'account deletion OTP verification');
-      const authCode = verifyError?.code;
-      setError(authCode === 'auth/invalid-verification-code'
-        ? t('delete.incorrectCode')
-        : ['auth/code-expired', 'auth/session-expired'].includes(authCode) ||
-          verifyError?.message === t('delete.expiredCode')
-          ? t('delete.expiredCode')
-          : t('delete.requestFailed'));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const confirmDeletion = async () => {
     if (busy) return;
@@ -271,7 +203,7 @@ function AccountDeletionDialog({ phone, language, onClose, onDeleted }) {
     } catch (deleteError) {
       console.warn('[Settings] Account deletion request failed:', deleteError.code || deleteError.name || 'account_deletion_error');
       setError(deleteError.code === 'RECENT_AUTH_REQUIRED'
-        ? t('delete.recentAuth')
+        ? (t('delete.recentAuth') || 'Please sign in again before deleting your account.')
         : t('delete.requestFailed'));
     } finally {
       setBusy(false);
@@ -289,54 +221,15 @@ function AccountDeletionDialog({ phone, language, onClose, onDeleted }) {
             <h2 id="account-delete-title">{t('delete.warningTitle')}</h2>
             <p>{t('delete.permanentWarning')}</p>
             <p>{t('delete.dataExplanation')}</p>
-            <div id="account-delete-recaptcha" ref={captchaContainerRef} />
             {error && <p className="settings-dialog-error" role="alert">{error}</p>}
             <footer>
               <button type="button" className="settings-secondary-button" onClick={onClose}>{t('delete.cancel')}</button>
               <button type="button" className="settings-primary-button danger" disabled={busy}
-                onClick={() => { setStep('phone'); setError(''); }}>
+                onClick={() => { setStep('final'); setError(''); }}>
                 {t('delete.continue')}
               </button>
             </footer>
           </>
-        )}
-        {step === 'phone' && (
-          <>
-            <h2 id="account-delete-title">{t('delete.verifyTitle')}</h2>
-            <p>{maskPhone(phone)}</p>
-            <div id="account-delete-recaptcha" ref={captchaContainerRef} />
-            {error && <p className="settings-dialog-error" role="alert">{error}</p>}
-            <footer>
-              <button type="button" className="settings-secondary-button" onClick={onClose}>{t('delete.cancel')}</button>
-              <button type="button" className="settings-primary-button" disabled={busy || !phone} onClick={() => void sendCode()}>
-                {busy ? t('delete.sending') : t('delete.sendCode')}
-              </button>
-            </footer>
-          </>
-        )}
-        {step === 'otp' && (
-          <form onSubmit={verifyCode}>
-            <h2 id="account-delete-title">{t('delete.enterCode')}</h2>
-            <p>{maskPhone(phone)}</p>
-            <label className="settings-otp-label">
-              <span>{t('delete.enterCode')}</span>
-              <input autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={code}
-                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} />
-            </label>
-            {error && <p className="settings-dialog-error" role="alert">{error}</p>}
-            <footer>
-              <button type="button" className="settings-secondary-button" onClick={onClose}>{t('delete.cancel')}</button>
-              <button type="submit" className="settings-primary-button" disabled={busy || code.length !== 6}>
-                {busy ? t('delete.verifying') : t('delete.verify')}
-              </button>
-              <button type="button" className="settings-link-button" disabled={busy} onClick={() => {
-                confirmationRef.current = null;
-                setCode('');
-                setStep('phone');
-                setError('');
-              }}>{t('delete.sendCode')}</button>
-            </footer>
-          </form>
         )}
         {step === 'final' && (
           <>
@@ -561,7 +454,7 @@ export default function SettingsCenter({ profile = {}, onEditFarm, onLogout, onO
             <p className="settings-permission-note">{t('settings.permissionNote')}</p>
           </div>
         </section>
-        {permissionGuide && (
+        {permissionGuide && createPortal(
           <div className="settings-dialog-backdrop" role="presentation" onMouseDown={(event) => {
             if (event.target === event.currentTarget) setPermissionGuide(false);
           }}>
@@ -575,7 +468,8 @@ export default function SettingsCenter({ profile = {}, onEditFarm, onLogout, onO
                 </button>
               </footer>
             </section>
-          </div>
+          </div>,
+          document.body
         )}
 
         <section className="settings-group">
@@ -583,7 +477,7 @@ export default function SettingsCenter({ profile = {}, onEditFarm, onLogout, onO
           <div className="settings-group-list">
             <SettingRow icon={Bell} title={t('settings.help')} description={t('settings.helpDescription')} action={t('settings.openHelp')} onClick={onOpenHelp} />
             <SettingRow icon={Mail} title={t('settings.contact')} description={t('settings.helpDescription')} action={t('settings.openHelp')} onClick={onOpenHelp} />
-            <SettingRow icon={Info} title={t('settings.about')} description="AgriShield-AI" action={t('settings.openHelp')} onClick={onOpenHelp} />
+            <SettingRow icon={Info} title={t('settings.about')} description="AgriShield" action={t('settings.openHelp')} onClick={onOpenHelp} />
             <SettingRow icon={Info} title={t('settings.appVersion')} description={import.meta.env.VITE_APP_VERSION || t('settings.versionUnavailable')} />
           </div>
         </section>
@@ -598,7 +492,7 @@ export default function SettingsCenter({ profile = {}, onEditFarm, onLogout, onO
             action={t('settings.signOut')} onClick={onLogout} />
         </div>
       </section>
-      {picker && (
+      {picker && createPortal(
         <PreferencePicker
           mode={picker}
           value={picker === 'language' ? language : appearance}
@@ -608,18 +502,19 @@ export default function SettingsCenter({ profile = {}, onEditFarm, onLogout, onO
             updateAppPreferences(picker === 'language' ? { language: value } : { appearance: value });
             setPicker('');
           }}
-        />
+        />,
+        document.body
       )}
-      {deleteAccountOpen && (
+      {deleteAccountOpen && createPortal(
         <AccountDeletionDialog
-          phone={profile.verifiedMobile || profile.phone || profile.mobile || ''}
           language={language}
           onClose={() => setDeleteAccountOpen(false)}
           onDeleted={() => {
             setDeleteAccountOpen(false);
             onAccountDeleted?.();
           }}
-        />
+        />,
+        document.body
       )}
     </div>
   );

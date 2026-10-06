@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import * as SunCalc from 'suncalc';
 import { 
   Shield, 
   Bell, 
@@ -9,9 +10,9 @@ import {
   Settings as SettingsIcon, 
   Rotate3d, 
   Layers, 
-  LogOut, 
   Bot, 
   CloudRain,
+  Plus,
   ArrowRight,
   ArrowLeft,
   Info,
@@ -31,7 +32,14 @@ import CropSchedule from '../components/CropSchedule';
 import ShopView from '../components/ShopView';
 import { useAppPreferences } from '../services/useAppPreferences';
 import { translate } from '../i18n';
+import { useFarmTwinClock } from '../services/useFarmTwinClock';
 import '../components/dashboardScheduleShop.css';
+import {
+  buildFarmWeatherSummary,
+  getFarmLocalTime,
+  getFarmTimeZone,
+  isFarmWeatherFresh
+} from '../components/farmTwinGeometry';
 import {
   getFarmTwinState,
   getNotifications,
@@ -90,20 +98,33 @@ const FARM_CONDITIONS = {
 export default function Dashboard({ 
   profile, 
   onEditFarm, 
+  onFarmSwitch,
+  onAddFarm,
+  farmTransitionError = '',
   onLogout,
   onAccountDeleted
 }) {
   const preferences = useAppPreferences();
   const t = (key, values) => translate(preferences.language, key, values);
+  const farmNow = useFarmTwinClock();
   const [activeTab, setActiveTab] = useState('home');
   const [shopContext, setShopContext] = useState({});
 
+  useEffect(() => {
+    document.title = activeTab === 'ai' ? 'AgriShield AI' : 'AgriShield';
+    return () => {
+      document.title = 'AgriShield';
+    };
+  }, [activeTab]);
+
   // Farm data synced from the authenticated profile.
-  const [currentProfile] = useState(profile);
+  const currentProfile = profile;
+  const farmId = currentProfile?.activeFarmId || currentProfile?.farm?._id || null;
 
   // Environmental state for Farm Twin and dynamic background
   const [environmentState, setEnvironmentState] = useState('NORMAL');
   const [weatherDataStatus, setWeatherDataStatus] = useState('unavailable');
+  const [farmTwinData, setFarmTwinData] = useState(null);
   const [alertsNotifications, setAlertsNotifications] = useState([]);
   const [alertsLoading, setAlertsLoading] = useState(preferences.notificationsEnabled);
   const [alertsError, setAlertsError] = useState('');
@@ -157,7 +178,7 @@ export default function Dashboard({
         }
       });
     return notificationsRequestRef.current;
-  }, [preferences.notificationsEnabled]);
+  }, [preferences.notificationsEnabled, farmId]);
 
   useEffect(() => {
     if (activeTab !== 'alerts') return undefined;
@@ -183,24 +204,46 @@ export default function Dashboard({
     }
   };
 
-  // The authenticated bootstrap already supplied the farmer and farm profile.
-  const farmId = currentProfile?.farm?._id ||
-    (currentProfile?.userId ? `farm-${currentProfile.userId}` : null);
-
   useEffect(() => {
+    setFarmTwinData(null);
+    setEnvironmentState('NORMAL');
+    setWeatherDataStatus('unavailable');
     if (!farmId) return undefined;
     let active = true;
-    getFarmTwinState(farmId)
+    const loadFarmTwin = () => getFarmTwinState(farmId)
       .then((twinRes) => {
         if (!active || !twinRes) return;
+        setFarmTwinData(twinRes);
         setEnvironmentState(twinRes.environmentState || 'NORMAL');
         setWeatherDataStatus(twinRes.dataStatus || 'unavailable');
       })
       .catch((error) => {
         if (active) console.warn('[Dashboard] Could not load Farm Twin status:', error.message);
       });
-    return () => { active = false; };
+    const refreshOnResume = () => {
+      if (document.visibilityState === 'visible') void loadFarmTwin();
+    };
+    void loadFarmTwin();
+    const refreshTimer = window.setInterval(() => { void loadFarmTwin(); }, 5 * 60 * 1000);
+    window.addEventListener('focus', refreshOnResume);
+    window.addEventListener('pageshow', refreshOnResume);
+    document.addEventListener('visibilitychange', refreshOnResume);
+    return () => {
+      active = false;
+      window.clearInterval(refreshTimer);
+      window.removeEventListener('focus', refreshOnResume);
+      window.removeEventListener('pageshow', refreshOnResume);
+      document.removeEventListener('visibilitychange', refreshOnResume);
+    };
   }, [farmId]);
+
+  useEffect(() => {
+    notificationsRequestGenerationRef.current += 1;
+    notificationsRequestRef.current = null;
+    setAlertsNotifications([]);
+    setAlertsError('');
+    setAlertsLoading(preferences.notificationsEnabled);
+  }, [farmId, preferences.notificationsEnabled]);
 
   const hasFarmSetup = Boolean(
     Number.isFinite(Number(currentProfile?.farm?.location?.lat)) &&
@@ -226,11 +269,30 @@ export default function Dashboard({
   const conditionLabel = weatherDataStatus === 'unavailable' || !currentCondition
     ? t('weather.unavailable')
     : t(`weather.${conditionTranslation}.label`);
-  const conditionMessage = weatherDataStatus === 'unavailable'
-    ? t('weather.baseline')
-    : conditionTranslation
-      ? t(`weather.${conditionTranslation}.status`)
-      : t('weather.fallback');
+  const currentFarmWeather = farmTwinData?.weather;
+  const weatherIsFresh = isFarmWeatherFresh(currentFarmWeather, farmNow);
+  const farmTimezone = getFarmTimeZone(currentProfile?.farm, {
+    ...currentFarmWeather,
+    timezone: currentFarmWeather?.timezone || farmTwinData?.timezone
+  });
+  const farmLocalTime = getFarmLocalTime(farmNow, farmTimezone);
+  const solarPosition = hasSavedCoordinates
+    ? SunCalc.getPosition(farmNow, farmLatitude, farmLongitude)
+    : null;
+  const farmIsDay = solarPosition
+    ? solarPosition.altitude > 0
+    : typeof currentFarmWeather?.current?.isDay === 'boolean'
+      ? currentFarmWeather.current.isDay
+      : undefined;
+  const weatherSummary = weatherIsFresh
+    ? buildFarmWeatherSummary({
+      currentWeather: currentFarmWeather.current,
+      farmLocalTime,
+      isDay: farmIsDay,
+      sunPhase: farmIsDay === undefined ? undefined : farmIsDay ? 'day' : 'night',
+      language: preferences.language
+    })
+    : null;
 
   // Dynamic greeting based on time of day
   const hour = new Date().getHours();
@@ -258,18 +320,18 @@ export default function Dashboard({
 
   return (
     <div className={`agri-dashboard-layout dynamic-env-${environmentState.toLowerCase()} animate-fadeIn`}>
-      {/* 1. TOP BAR (AgriShield-AI branding, Notification bell, Profile button) */}
+      {/* Top bar with product branding, notifications, farm switcher, and profile. */}
       <header className="agri-top-navbar">
         <div className="top-navbar-inner">
-          <div className="top-brand" onClick={() => setActiveTab('home')} role="button" tabIndex={0}>
+          <button type="button" className="top-brand" onClick={() => setActiveTab('home')}>
             <div className="brand-logo-icon">
               <Shield size={22} color="#10b981" />
             </div>
             <div className="brand-labels">
-              <h1 className="brand-title-text">AgriShield-AI</h1>
-              <span className="brand-subline">Intelligent Agricultural Defense System</span>
+              <h1 className="brand-title-text">AgriShield</h1>
+              <span className="brand-subline">{t('dashboard.brandSubline')}</span>
             </div>
-          </div>
+          </button>
 
           <div className="top-user-controls">
             <button
@@ -293,6 +355,34 @@ export default function Dashboard({
               {unreadAlertsCount > 0 && <span className="top-icon-badge">{unreadAlertsCount}</span>}
             </button>
 
+            {(currentProfile?.farms?.length || 0) > 0 && (
+              <label className="farm-switcher">
+                <Layers size={16} aria-hidden="true" />
+                <span className="sr-only">{t('dashboard.chooseFarm')}</span>
+                <select
+                  aria-label={t('dashboard.chooseFarm')}
+                  value={currentProfile.activeFarmId || currentProfile.farm?._id || ''}
+                  onChange={(event) => onFarmSwitch?.(event.target.value)}
+                  disabled={currentProfile.farms.length < 2}
+                >
+                  {currentProfile.farms.map((farm) => (
+                    <option key={farm.farmId} value={farm.farmId}>
+                      {farm.name}{farm.areaAcres ? ` · ${farm.areaAcres} acres` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              type="button"
+              className="btn-top-icon farm-add-button"
+              onClick={onAddFarm}
+              title={t('dashboard.addFarm')}
+              aria-label={t('dashboard.addFarm')}
+            >
+              <Plus size={18} aria-hidden="true" />
+            </button>
+
             {/* Profile Avatar Button */}
             <button 
               type="button" 
@@ -309,21 +399,17 @@ export default function Dashboard({
               </div>
             </button>
 
-            {/* Log Out */}
-            <button 
-              type="button" 
-              className="btn-top-logout" 
-              onClick={onLogout}
-              title={t('settings.signOut')}
-            >
-              <LogOut size={16} />
-            </button>
           </div>
         </div>
       </header>
 
       {/* 2. MAIN VIEW CONTAINER */}
       <main className="agri-main-viewport">
+        {farmTransitionError && (
+          <div className="farm-transition-error" role="alert">
+            {farmTransitionError}
+          </div>
+        )}
         {/* TAB: HOME / DYNAMIC FARM TWIN DASHBOARD */}
         {activeTab === 'home' && (
           <div className="home-farm-dashboard animate-fadeIn">
@@ -380,6 +466,8 @@ export default function Dashboard({
                     boundaryData={currentProfile?.farm?.boundary}
                     environmentState={environmentState}
                     farmInfo={currentProfile?.farm}
+                    weatherData={farmTwinData?.weather}
+                    farmTimeZone={farmTwinData?.timezone}
                     height={380}
                   />
                 </div>
@@ -388,8 +476,13 @@ export default function Dashboard({
                 <div className={`farm-condition-status-bar ${environmentState.toLowerCase()}`}>
                   <div className="status-indicator-dot"></div>
                   <div className="status-text-content">
-                    <span className="condition-pill-tag font-mono">{conditionLabel}</span>
-                    <p className="condition-status-sentence">{conditionMessage}</p>
+                    <span className="condition-pill-tag font-mono">{weatherSummary?.title || conditionLabel}</span>
+                    <p className="condition-status-sentence">
+                      {weatherSummary?.summary || t('weather.baseline')}
+                    </p>
+                    {weatherSummary?.detail && (
+                      <small className="farm-weather-summary-detail">{weatherSummary.detail}</small>
+                    )}
                   </div>
 
                   <button 
@@ -406,6 +499,7 @@ export default function Dashboard({
             )}
 
             <CropSchedule
+              key={farmId || 'no-active-farm'}
               farm={currentProfile?.farm}
               onViewInShop={(context) => {
                 setShopContext(context);
@@ -420,9 +514,10 @@ export default function Dashboard({
           <div className="tab-pane-container animate-fadeIn">
             <AIChatErrorBoundary>
               <AIChatView
+                key={`${currentProfile?.userId || ''}:${farmId || 'no-active-farm'}`}
                 farmerId={currentProfile?.userId}
+                farmId={farmId}
                 profile={currentProfile}
-                onOpenWeatherMap={() => setActiveTab('weather')}
               />
             </AIChatErrorBoundary>
           </div>
@@ -457,6 +552,7 @@ export default function Dashboard({
         {activeTab === 'weather' && (
           <div className="tab-pane-container animate-fadeIn">
             <WeatherView
+              key={farmId || 'no-active-farm'}
               profile={currentProfile}
               onAskWeatherToAI={() => setActiveTab('ai')}
               onOpenFarmSetup={onEditFarm}
@@ -483,7 +579,7 @@ export default function Dashboard({
                 <div className="farmtwin-title-col">
                   <div className="title-row">
                     <Rotate3d size={24} color="#10b981" />
-                    <h3>3D Farm Twin & Topography</h3>
+                    <h3>{t('dashboard.farmTwinTitle')}</h3>
                   </div>
                   <p className="subtext">
                     Farm visualization from your saved boundary, with current weather shown when available.
@@ -504,6 +600,8 @@ export default function Dashboard({
                   boundaryData={currentProfile?.farm?.boundary}
                   environmentState={environmentState}
                   farmInfo={currentProfile?.farm}
+                  weatherData={farmTwinData?.weather}
+                  farmTimeZone={farmTwinData?.timezone}
                   height={500}
                 />
               </div>
@@ -514,8 +612,8 @@ export default function Dashboard({
                   <div className="detail-icon"><MapPin size={20} color="#10b981" /></div>
                   <h4>Geospatial Coordinates</h4>
                   <p className="font-mono">
-                    {currentProfile?.farm?.location?.lat 
-                      ? `${Number(currentProfile.farm.location.lat).toFixed(6)}° N, ${Number(currentProfile.farm.location.lng).toFixed(6)}° E` 
+                    {hasSavedCoordinates
+                      ? `${Math.abs(farmLatitude).toFixed(6)}° ${farmLatitude < 0 ? 'S' : 'N'}, ${Math.abs(farmLongitude).toFixed(6)}° ${farmLongitude < 0 ? 'W' : 'E'}`
                       : 'Coordinates not calibrated'}
                   </p>
                   <span className="detail-sub">Mapped on satellite layer</span>
@@ -543,7 +641,7 @@ export default function Dashboard({
                   <div className="detail-icon"><Sprout size={20} color="#10b981" /></div>
                   <h4>Registered Crop</h4>
                   <p>{cropName ? `${cropName} ${currentProfile?.farm?.variety ? `(${currentProfile.farm.variety})` : ''}` : 'None specified (Optional)'}</p>
-                  <span className="detail-sub">{currentProfile?.farm?.soilType || 'Soil: Default terrain'}</span>
+                  <span className="detail-sub">{currentProfile?.farm?.soilType || t('dashboard.soilNotProvided')}</span>
                 </div>
               </div>
             </div>
@@ -566,8 +664,8 @@ export default function Dashboard({
                 <div className="alerts-title-row">
                   <span className="alerts-title-icon"><Bell size={22} aria-hidden="true" /></span>
                   <div>
-                    <h2>Farm Alerts</h2>
-                    <p>Important updates and advisories for your farm</p>
+                    <h2>{t('alerts.pageTitle')}</h2>
+                    <p>{t('alerts.pageDescription')}</p>
                   </div>
                 </div>
               </header>
@@ -600,7 +698,7 @@ export default function Dashboard({
                           ? 'Review the critical notification below.'
                           : attentionCount
                             ? 'Review your latest farm advisories below.'
-                            : 'Your farm is being monitored. No critical alerts have been reported.'}
+                            : t('alerts.noCurrent')}
                   </p>
                 </div>
                 {!alertsLoading && !alertsError && (

@@ -52,7 +52,24 @@ function receiveImage(req, res, next) {
     { name: 'imageFile', maxCount: 1 },
     { name: 'image', maxCount: 1 }
   ])(req, res, (error) => {
-    if (error) return next(error);
+    if (error) {
+      const tooLarge = error.code === 'LIMIT_FILE_SIZE';
+      const validationError = error instanceof AgriShieldError
+        ? error
+        : new AgriShieldError(
+          tooLarge ? ERROR_CODES.IMAGE_TOO_LARGE : ERROR_CODES.INVALID_INPUT,
+          tooLarge ? 'Image size exceeds the 10MB limit.' : 'The image upload could not be processed.',
+          tooLarge ? 413 : 400
+        );
+      const language = String(req.body?.languageCode || req.body?.language || 'en').split('-')[0];
+      return res.status(validationError.statusCode).json({
+        success: false,
+        error: {
+          code: validationError.code,
+          message: validationError.getFarmerMessage(['en', 'hi', 'te'].includes(language) ? language : 'en')
+        }
+      });
+    }
     const uploaded = req.files?.imageFile?.[0] || req.files?.image?.[0] || null;
     if (req.files?.imageFile?.length && req.files?.image?.length) {
       return next(new AgriShieldError(ERROR_CODES.INVALID_INPUT, 'Send only one image per request.', 400));
@@ -82,7 +99,7 @@ const audioUpload = multer({
 function validateChatInput(req, res, next) {
   const { message, image } = req.body;
   const file = req.file;
-  const language = req.body.language;
+  const language = req.body.languageCode || req.body.language;
   const conversationId = req.body.conversationId;
 
   if (!message && !image && !file) {
@@ -101,7 +118,7 @@ function validateChatInput(req, res, next) {
       error: { code: ERROR_CODES.INVALID_INPUT, message: 'Message must be 4000 characters or fewer.' }
     });
   }
-  if (language !== undefined && !['auto', 'en', 'te', 'hi'].includes(language)) {
+  if (language !== undefined && !['auto', 'en', 'te', 'hi', 'en-IN', 'hi-IN', 'te-IN'].includes(language)) {
     return res.status(400).json({
       success: false,
       error: { code: ERROR_CODES.INVALID_INPUT, message: 'Language must be auto, en, te, or hi.' }

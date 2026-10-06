@@ -25,6 +25,8 @@ import {
   Upload,
   X
 } from 'lucide-react';
+import { useAppPreferences } from '../services/useAppPreferences';
+import { translate } from '../i18n';
 import {
   getSupportAccountStatus,
   getSupportContact,
@@ -36,7 +38,7 @@ import {
 const SUPPORT_CARDS = [
   {
     id: 'ai',
-    title: 'AgriShield AI Support',
+    title: 'AgriShield Support',
     description: 'Get help with your farm, weather, crops, or general questions.',
     Icon: Bot,
     keywords: 'chat voice microphone image analysis assistant telugu hindi english general'
@@ -46,7 +48,7 @@ const SUPPORT_CARDS = [
     title: 'Account Status',
     description: 'View your verified account and registered mobile.',
     Icon: ShieldCheck,
-    keywords: 'user id mobile otp verified security account'
+    keywords: 'user id email mobile password verified security account'
   },
   {
     id: 'permissions',
@@ -95,7 +97,7 @@ const INFORMATION_CARDS = [
   },
   {
     id: 'about',
-    title: 'About AgriShield AI',
+    title: 'About AgriShield',
     description: 'Learn how farm weather, AI guidance, and Farm Twin work together.',
     Icon: Info,
     keywords: 'about information version privacy how it works farm twin'
@@ -117,7 +119,7 @@ const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
 const PERMISSION_DEFINITIONS = [
   { id: 'location', name: 'Location', detail: 'Used when you choose GPS for farm location and location-based features.', Icon: MapPin },
   { id: 'notifications', name: 'Notifications', detail: 'May be used for important account and service information.', Icon: Bell },
-  { id: 'microphone', name: 'Microphone', detail: 'Microphone access is required for voice conversations with AgriShield AI.', Icon: Mic },
+  { id: 'microphone', name: 'Microphone', detail: 'Microphone access is required for voice questions in AgriShield.', Icon: Mic },
   { id: 'camera', name: 'Camera', detail: 'Camera access may be required when capturing crop images for AI analysis.', Icon: Camera },
 ];
 
@@ -199,6 +201,8 @@ function FaqList({ faqs, query }) {
 }
 
 export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarmSetup }) {
+  const { language } = useAppPreferences();
+  const t = (key, values) => translate(language, key, values);
   const [section, setSection] = useState(null);
   const [query, setQuery] = useState('');
   const [contact, setContact] = useState(null);
@@ -286,7 +290,8 @@ export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarm
       if (navigator.permissions?.query) {
         await Promise.all(permissionNames.map(async (name) => {
           try {
-            const result = await navigator.permissions.query({ name });
+            const permissionName = name === 'location' ? 'geolocation' : name;
+            const result = await navigator.permissions.query({ name: permissionName });
             next[name] = result.state;
             result.addEventListener?.('change', () => {
               setPermissions((current) => ({ ...current, [name]: result.state }));
@@ -412,8 +417,8 @@ export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarm
     if (section === 'ai') {
       return (
         <section className="help-detail-panel">
-          <DetailHeader title="AgriShield AI Support" onBack={() => setSection(null)} />
-          <p className="help-lead">Ask AgriShield AI about your farm, weather, crops, or general questions.</p>
+          <DetailHeader title="AgriShield Support" onBack={() => setSection(null)} />
+          <p className="help-lead">Get help with your account, farm, weather, crops, or the AI assistant.</p>
           <button type="button" className="help-primary-button" onClick={onOpenAssistant}>
             <Bot size={18} /> Open AI Assistant <ArrowRight size={16} />
           </button>
@@ -493,10 +498,10 @@ export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarm
                     <LockKeyhole size={20} />
                     <div><h3>Security Information</h3>
                       <ul>
-                        <li>Phone number verified through OTP when verification data is available.</li>
+                        <li>Authenticated using secure Firebase Email and Password.</li>
                         <li>Support account details require an authenticated session.</li>
                         <li>Farm data is associated with the signed-in account.</li>
-                        <li>Never share your one-time verification code.</li>
+                        <li>Never share your account password or credentials with anyone.</li>
                       </ul>
                     </div>
                   </div>
@@ -521,14 +526,14 @@ export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarm
     if (section === 'about') {
       return (
         <section className="help-detail-panel">
-          <DetailHeader title="About AgriShield AI" onBack={() => setSection(null)} />
-          <h3 className="help-content-title">What is AgriShield AI?</h3>
-          <p className="help-lead">AgriShield AI brings farm location, available weather information, AI assistance, and a Farm Twin together to provide farmer-friendly guidance.</p>
+          <DetailHeader title="About AgriShield" onBack={() => setSection(null)} />
+          <h3 className="help-content-title">What is AgriShield?</h3>
+          <p className="help-lead">AgriShield brings farm location, available weather information, AI assistance, and a Farm Twin together to provide farmer-friendly guidance.</p>
           <h3 className="help-content-title">How it works</h3>
           <div className="help-flow-diagram" aria-label="Available farm weather and saved farm details provide context for farmer advisory">
             {[
               ['Weather Service', 'Current weather when available'],
-              ['AgriShield AI', 'Farm location and weather context'],
+              ['AgriShield', 'Farm location and weather context'],
               ['Agriculture Knowledge', 'Context-aware assistance'],
               ['Farmer Advisory', 'Clear guidance and next steps']
             ].map(([title, description], index) => (
@@ -544,7 +549,7 @@ export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarm
             <article><h3>Farm Twin</h3><p>The farm visualization uses saved boundaries and available environmental information. It indicates when data is unavailable rather than presenting invented live readings.</p></article>
             <article><h3>Farm Information</h3><p>Farm location and boundary are set by the farmer. Crop and soil information remain optional and are not assumed.</p></article>
             <article><h3>Version Information</h3><p>{import.meta.env.VITE_APP_VERSION || 'Not available'}</p></article>
-            <article><h3>Privacy & Security</h3><p>Account support details are requested through the authenticated backend session. Do not share OTP codes or private account information.</p></article>
+            <article><h3>Privacy & Security</h3><p>Account support details are requested through the authenticated backend session. Never share your password or private account credentials.</p></article>
           </div>
         </section>
       );
@@ -554,10 +559,10 @@ export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarm
       return (
         <section className="help-detail-panel">
           <DetailHeader
-            title={section === 'contact' ? 'Contact AgriShield AI' : section === 'report' ? 'Report an Issue' : 'Send Feedback'}
+            title={section === 'contact' ? 'Contact AgriShield Support' : section === 'report' ? 'Report an Issue' : 'Send Feedback'}
             onBack={() => setSection(section === 'report' || section === 'feedback' ? 'contact' : null)}
           />
-          {section === 'contact' && <p className="help-lead">Need assistance? Contact AgriShield-AI support.</p>}
+          {section === 'contact' && <p className="help-lead">Need assistance? Contact AgriShield Support.</p>}
           {contactError
             ? <LoadError message={contactError} onRetry={retrySelectedSection} />
             : contactLoading
@@ -625,7 +630,7 @@ export default function ExpertHelpView({ onOpenAssistant, onOpenPage, onOpenFarm
     <div className="help-support-page">
       <header className="help-page-heading">
         <div className="help-heading-icon"><CircleHelp size={22} /></div>
-        <div><h2>Help &amp; Support</h2><p>Find answers and get help with your AgriShield account and farm tools.</p></div>
+        <div><h2>{t('help.title')}</h2><p>Find answers and get help with your account and farm tools.</p></div>
       </header>
 
       <label className="help-search-box">

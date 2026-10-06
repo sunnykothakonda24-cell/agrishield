@@ -22,140 +22,41 @@ import {
   ThumbsUp,
   ThumbsDown,
   PlusCircle,
+  MoreHorizontal,
   ShieldCheck,
-  StopCircle
+  StopCircle,
+  MicOff,
+  PhoneOff
 } from 'lucide-react';
 import { updateAppPreferences } from '../services/appPreferences';
 import { useAppPreferences } from '../services/useAppPreferences';
+import { connectGeminiLiveVoice } from '../services/geminiLiveVoice';
+import { requestMicrophoneAccess } from '../services/microphone';
+import { translate } from '../i18n';
 import { 
   sendMessageToAI, 
   transcribeVoice, 
   getAIConversation,
   clearAIConversation,
-  speakVoice,
-  submitAIFeedback
+  speakVoiceStream,
+  getLiveVoiceToken,
+  saveLiveVoiceMessage,
+  getVoiceConfig,
+  submitAIFeedback,
+  retryAIImageAnalysis
 } from '../services/api';
 
-// Multi-lingual UI Strings (Section 4, 14, 15, 43, 193)
-const TRANSLATIONS = {
-  te: {
-    title: 'అగ్రిషీల్డ్ AI',
-    subtitle: 'రైతు నేస్తం • నిజమైన AI సంభాషణ సహాయకుడు',
-    assistantLabel: 'ఏఐ సహాయకుడు',
-    assistantSub: 'మీ వ్యవసాయ సహాయకుడు',
-    weatherMap: 'వాతావరణ మ్యాప్',
-    openWeatherMap: 'వాతావరణ, వర్షపు మ్యాప్ తెరవండి',
-    changeLanguage: 'భాష మార్చండి',
-    auto: 'ఆటో',
-    autoDetect: 'భాషను స్వయంచాలకంగా గుర్తించండి',
-    farmerProfile: 'రైతు ప్రొఫైల్',
-    farmer: 'రైతు',
-    cropNotSpecified: 'పంట వివరాలు లేవు',
-    placeholder: 'ఏదైనా అడగండి లేదా మాట్లాడటానికి మైక్ నొక్కండి...',
-    recording: 'రికార్డింగ్ అవుతోంది...',
-    recordingSub: 'స్పష్టంగా మాట్లాడండి',
-    cancel: 'రద్దు',
-    send: 'పంపండి',
-    thinking: 'అగ్రిషీల్డ్-AI సమాధానం సిద్ధం చేస్తోంది...',
-    stopGenerating: 'ఆపండి',
-    tryAgain: 'మళ్ళీ ప్రయత్నించండి',
-    errorGeneral: 'మీ ప్రశ్నకు సమాధానం ఇవ్వడంలో సమస్య ఎదురైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.',
-    errorSpeech: 'మీరు చెప్పింది సరిగ్గా అర్థం కాలేదు. దయచేసి మరోసారి చెప్పగలరా?',
-    offlineAlert: 'ఇంటర్నెట్ కనెక్షన్ అందుబాటులో లేదు. దయచేసి మీ నెట్‌వర్క్ తనిఖీ చేయండి.',
-    listen: 'వినండి',
-    pause: 'పాజ్',
-    resume: 'ప్లే',
-    stop: 'ఆపండి',
-    copy: 'కాపీ',
-    copied: 'కాపీ చేయబడింది!',
-    newChat: 'కొత్త సంభాషణ',
-    whatIsHappening: 'ఏం జరుగుతోంది',
-    whatYouShouldDo: 'మీరు చేయాల్సింది',
-    warning: 'ముఖ్యమైన హెచ్చరిక',
-    nextStep: 'తదుపరి అడుగు',
-    welcomeTitle: 'నమస్కారం! నేను అగ్రిషీల్డ్-AI.',
-    welcomeSub: 'మీ వ్యవసాయం, పంటలు, వాతావరణం లేదా ఇతర అవసరాల గురించి అడగండి.',
-    voiceBubblePrefix: 'మీరు చెప్పారు'
-  },
-  hi: {
-    title: 'एग्रीशील्ड AI',
-    subtitle: 'किसान साथी • वास्तविक AI कृषि संवाद सहायक',
-    assistantLabel: 'AI सहायक',
-    assistantSub: 'आपका खेती सहायक',
-    weatherMap: 'मौसम मानचित्र',
-    openWeatherMap: 'मौसम और वर्षा मानचित्र खोलें',
-    changeLanguage: 'भाषा बदलें',
-    auto: 'ऑटो',
-    autoDetect: 'भाषा अपने आप पहचानें',
-    farmerProfile: 'किसान प्रोफ़ाइल',
-    farmer: 'किसान',
-    cropNotSpecified: 'फसल की जानकारी नहीं',
-    placeholder: 'कुछ भी पूछें या बोलने के लिए माइक दबाएं...',
-    recording: 'रिकॉर्डिंग जारी है...',
-    recordingSub: 'माइक के पास स्पष्ट बोलें',
-    cancel: 'रद्द करें',
-    send: 'भेजें',
-    thinking: 'एग्रीशील्ड-AI जवाब तैयार कर रहा है...',
-    stopGenerating: 'रोकें',
-    tryAgain: 'पुनः प्रयास करें',
-    errorGeneral: 'आपके प्रश्न का उत्तर देने में समस्या हुई। कृपया दोबारा प्रयास करें।',
-    errorSpeech: 'आपकी आवाज स्पष्ट सुनाई नहीं दी। कृपया दोबारा बोलें।',
-    offlineAlert: 'इंटरनेट कनेक्शन उपलब्ध नहीं है। कृपया नेटवर्क जांचें।',
-    listen: 'सुनें',
-    pause: 'रोकें',
-    resume: 'चलाएं',
-    stop: 'बंद करें',
-    copy: 'कॉपी',
-    copied: 'कॉपी हो गया!',
-    newChat: 'नई बातचीत',
-    whatIsHappening: 'क्या हो रहा है',
-    whatYouShouldDo: 'आपको क्या करना चाहिए',
-    warning: 'महत्वपूर्ण सावधानी',
-    nextStep: 'अगला कदम',
-    welcomeTitle: 'नमस्ते! मैं एग्रीशील्ड-AI हूँ।',
-    welcomeSub: 'खेती, फसलों, पौधों, मिट्टी या दैनिक जीवन के बारे में कुछ भी पूछें।',
-    voiceBubblePrefix: 'आपने कहा'
-  },
-  en: {
-    title: 'AgriShield AI',
-    subtitle: 'Farmer Companion • Multimodal Agronomy Assistant',
-    assistantLabel: 'AI Assistant',
-    assistantSub: 'Your farming assistant',
-    weatherMap: 'Weather map',
-    openWeatherMap: 'Open Weather and Rain Map',
-    changeLanguage: 'Change language',
-    auto: 'Auto',
-    autoDetect: 'Auto detect',
-    farmerProfile: 'Farmer Profile',
-    farmer: 'Farmer',
-    cropNotSpecified: 'Crop not specified',
-    placeholder: 'Message AgriShield AI...',
-    recording: 'Recording...',
-    recordingSub: 'Speak clearly into the microphone',
-    cancel: 'Cancel',
-    send: 'Send',
-    thinking: 'AgriShield-AI is preparing a response...',
-    stopGenerating: 'Stop',
-    tryAgain: 'Try Again',
-    errorGeneral: "I couldn't process your question right now. Please try again.",
-    errorSpeech: "I couldn't understand that clearly. Please say it again.",
-    offlineAlert: 'Internet connection is unavailable. Please check your connection.',
-    listen: 'Listen',
-    pause: 'Pause',
-    resume: 'Resume',
-    stop: 'Stop',
-    copy: 'Copy',
-    copied: 'Copied!',
-    newChat: 'New chat',
-    whatIsHappening: 'What is happening',
-    whatYouShouldDo: 'What you should do',
-    warning: 'Important Precautions',
-    nextStep: 'Next Step',
-    welcomeTitle: "Hello! I'm AgriShield-AI.",
-    welcomeSub: 'Ask me anything about farming, crops, plants, soil, or everyday questions.',
-    voiceBubblePrefix: 'You said'
-  }
-};
+function voiceDiagnostic(stage, details = {}) {
+  if (!import.meta.env.DEV) return;
+  const event = { stage, monotonicMs: highResolutionNow(), ...details };
+  window.__AGRISHIELD_TTS_TIMINGS__ ||= [];
+  window.__AGRISHIELD_TTS_TIMINGS__.push(event);
+  console.debug(`[AgriShield voice] ${stage}`, details);
+}
+
+function highResolutionNow() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
 
 /**
  * XSS-Safe Markdown to JSX Parser (Section 80, 81, 104)
@@ -236,18 +137,34 @@ function SafeMarkdownRenderer({ content }) {
   return <div className="message-markdown-text">{elements}</div>;
 }
 
-export default function AIChatView({ farmerId, profile = {}, initialLanguage = 'auto', onOpenWeatherMap }) {
-  const conversationOwnerKey = farmerId || 'unverified';
+export default function AIChatView({ farmerId, farmId, profile = {}, initialLanguage = 'auto' }) {
+  const conversationOwnerKey = farmerId && farmId
+    ? `${farmerId}_${farmId}`
+    : farmerId || 'unverified';
   const conversationIdStorageKey = `agrishield_conv_id_${conversationOwnerKey}`;
   const preferences = useAppPreferences();
   const [useAutomaticLanguage, setUseAutomaticLanguage] = useState(initialLanguage === 'auto' && !localStorage.getItem('agrishield_lang'));
   const language = useAutomaticLanguage ? 'auto' : preferences.language;
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const browserLanguage = navigator.language?.toLowerCase() || '';
   const uiLanguage = language === 'auto'
     ? (browserLanguage.startsWith('te') ? 'te' : browserLanguage.startsWith('hi') ? 'hi' : 'en')
     : language;
-  const t = TRANSLATIONS[uiLanguage] || TRANSLATIONS.en;
+  const t = new Proxy(Object.create(null), {
+    get: (_target, key) => typeof key === 'string'
+      ? translate(uiLanguage, `aiChat.${key}`)
+      : undefined
+  });
+  const aiT = (key, values = {}) => translate(uiLanguage, `ai.${key}`, values);
+  const activeFarm = profile?.farm || {};
+  const farmLabel = activeFarm.farmName || activeFarm.name || profile?.farmName || '';
+  const farmArea = activeFarm.area?.acres ?? activeFarm.areaAcres ?? profile?.area?.acres;
+  const farmContextLabel = farmLabel
+    ? (farmArea !== undefined && farmArea !== null && farmArea !== ''
+      ? aiT('usingFarm', { farm: farmLabel, area: farmArea })
+      : aiT('usingFarmNoArea', { farm: farmLabel }))
+    : aiT('usingFarmData');
 
   // 2. Conversation session state (Section 9, 138, 139)
   const [conversationId, setConversationId] = useState(() => {
@@ -278,6 +195,8 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
   const [feedbackState, setFeedbackState] = useState({});
   const [feedbackError, setFeedbackError] = useState('');
   const [feedbackPendingId, setFeedbackPendingId] = useState(null);
+  const sendLockRef = useRef(false);
+  const previewUrlsRef = useRef(new Set());
 
   // 4. Multimodal Image attachments state (Section 22, 23, 29)
   const [attachedImage, setAttachedImage] = useState(null);
@@ -290,16 +209,33 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [speechTranscript, setSpeechTranscript] = useState('');
+  const [maxRecordingSeconds, setMaxRecordingSeconds] = useState(60);
+  const [voiceConfigLoading, setVoiceConfigLoading] = useState(true);
+  const recordingSecondsRef = useRef(0);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const recordTimerRef = useRef(null);
 
   // 6. Voice Playback / Text-to-Speech state (Section 19, 20, 21)
   const [playingMessageId, setPlayingMessageId] = useState(null);
+  const [preparingMessageId, setPreparingMessageId] = useState(null);
   const [isPaused, setIsPaused] = useState(false);
-  const currentUtteranceRef = useRef(null);
   const activeAudioElementRef = useRef(null);
+  const ttsAbortControllerRef = useRef(null);
+  const ttsReaderRef = useRef(null);
+  const audioObjectUrlRef = useRef(null);
+  const mediaSourceRef = useRef(null);
+  const [liveDialogOpen, setLiveDialogOpen] = useState(false);
+  const [liveStatus, setLiveStatus] = useState('idle');
+  const [liveError, setLiveError] = useState('');
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [livePartialTranscript, setLivePartialTranscript] = useState('');
+  const [liveMuted, setLiveMuted] = useState(false);
+  const [liveSessionSeconds, setLiveSessionSeconds] = useState(0);
+  const [liveMaxMinutes, setLiveMaxMinutes] = useState(30);
+  const liveSessionRef = useRef(null);
+  const liveStartIdRef = useRef(0);
+  const liveFarmIdRef = useRef(farmId);
 
   // 7. Request AbortController for Stop Generation (Section 45, 144)
   const abortControllerRef = useRef(null);
@@ -316,7 +252,8 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
     const storedMessages = messages.map((message) => ({
       ...message,
       voiceBlobUrl: null,
-      image: typeof message.image === 'string' && message.image.startsWith('data:image/')
+      image: typeof message.image === 'string' &&
+        (message.image.startsWith('data:image/') || message.image.startsWith('blob:'))
         ? null
         : message.image
     }));
@@ -324,26 +261,60 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [messages, isThinking, speechTranscript, conversationId, conversationOwnerKey]);
+  }, [messages, isThinking, conversationId, conversationOwnerKey]);
 
   useEffect(() => {
     let active = true;
-    if (!farmerId || messages.length > 0) return () => { active = false; };
+    if (!farmerId) return () => { active = false; };
 
     getAIConversation(conversationId)
       .then(({ messages: storedMessages = [] }) => {
-        if (!active || messagesRef.current.length > 0 || !storedMessages.length) return;
-        setMessages(storedMessages.map((message) => ({
-          id: message.id || message._id,
-          sender: message.role === 'assistant' ? 'ai' : 'farmer',
-          text: message.message,
-          language: message.language || 'en',
-          intent: message.intent || null,
-          conversationPersisted: true,
-          timestamp: message.createdAt
-            ? new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : ''
-        })));
+        if (!active || !storedMessages.length) return;
+        setMessages((currentMessages) => {
+          const mergedMessages = [...currentMessages];
+          const matchedIndexes = new Set();
+          storedMessages.forEach((storedMessage) => {
+            const sender = storedMessage.role === 'assistant' ? 'ai' : 'farmer';
+            const matchedIndex = mergedMessages.findIndex((message, index) =>
+              !matchedIndexes.has(index) &&
+              message.sender === sender &&
+              message.text === storedMessage.message
+            );
+            const restoredMessage = {
+              id: storedMessage.id || storedMessage._id,
+              sender,
+              text: storedMessage.message,
+              language: storedMessage.language || 'en',
+              intent: storedMessage.intent || null,
+              inputType: storedMessage.inputType || 'text',
+              isVoice: storedMessage.inputType === 'voice' || storedMessage.inputType === 'voice_image',
+              imagePath: storedMessage.imagePath || null,
+              image: storedMessage.imageUrl || null,
+              serverMessageId: storedMessage._id || null,
+              analysisStatus: storedMessage.analysisStatus || null,
+              attachment: storedMessage.attachment || null,
+              conversationPersisted: true,
+              timestamp: storedMessage.createdAt
+                ? new Date(storedMessage.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : ''
+            };
+            if (matchedIndex >= 0) {
+              matchedIndexes.add(matchedIndex);
+              mergedMessages[matchedIndex] = {
+                ...mergedMessages[matchedIndex],
+                ...restoredMessage,
+                id: mergedMessages[matchedIndex].id,
+                image: mergedMessages[matchedIndex].image?.startsWith('blob:')
+                  ? mergedMessages[matchedIndex].image
+                  : restoredMessage.image,
+                voiceBlobUrl: mergedMessages[matchedIndex].voiceBlobUrl || null
+              };
+            } else {
+              mergedMessages.push(restoredMessage);
+            }
+          });
+          return mergedMessages;
+        });
       })
       .catch((error) => {
         if (active && error.status !== 503) {
@@ -352,13 +323,53 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
       });
 
     return () => { active = false; };
-  }, [farmerId, conversationId, messages.length]);
+  }, [farmerId, conversationId]);
+
+  useEffect(() => {
+    let active = true;
+    getVoiceConfig()
+      .then(({ maxRecordingSeconds: configuredLimit }) => {
+        if (active) setMaxRecordingSeconds(Math.min(Math.max(configuredLimit, 1), 60));
+      })
+      .catch((error) => {
+        console.warn('[AIChatView] Voice recording configuration could not be loaded:', error.message);
+      })
+      .finally(() => {
+        if (active) setVoiceConfigLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => () => {
+    liveStartIdRef.current += 1;
+    previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrlsRef.current.clear();
     messagesRef.current.forEach((message) => {
       if (message.voiceBlobUrl) URL.revokeObjectURL(message.voiceBlobUrl);
     });
+    liveSessionRef.current?.stop();
+    liveSessionRef.current = null;
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    if (mediaRecorderRef.current?.state !== 'inactive') {
+      mediaRecorderRef.current?.stream?.getTracks().forEach((track) => track.stop());
+      mediaRecorderRef.current?.stop();
+    }
+    activeAudioElementRef.current?.pause();
   }, []);
+
+  useEffect(() => {
+    if (liveFarmIdRef.current === farmId) return;
+    liveStartIdRef.current += 1;
+    liveSessionRef.current?.stop();
+    liveSessionRef.current = null;
+    liveFarmIdRef.current = farmId;
+    setLiveDialogOpen(false);
+    setLiveStatus('idle');
+    setLiveTranscript('');
+    setLivePartialTranscript('');
+    setLiveSessionSeconds(0);
+    setLiveMuted(false);
+  }, [farmId]);
 
   // Monitor Network Connectivity (Section 47)
   useEffect(() => {
@@ -384,6 +395,7 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
 
     // Stop active audio
     handleStopAudio();
+    if (liveStatus !== 'idle' || liveSessionRef.current) endLiveVoice();
   };
 
   // Start a fresh conversation (Section 138, 139)
@@ -407,7 +419,7 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
       await clearAIConversation(conversationId);
     } catch (error) {
       console.error('[AIChatView] Could not clear the previous server conversation:', error);
-      setVoiceError(error.message || 'The previous conversation could not be cleared on the server.');
+      setVoiceError(error.message || aiT('previousConversationClearError'));
     }
   };
 
@@ -416,29 +428,37 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
     if (!file) return;
 
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setAttachmentError('Choose a JPG, PNG, or WEBP image.');
+      setAttachmentError(aiT('imageTypeError'));
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setAttachmentError(t.imageTooLarge || 'Please upload an image smaller than 10MB');
+      setAttachmentError(aiT('imageTooLarge'));
       return;
     }
 
+    if (attachedImage?.url?.startsWith('blob:')) {
+      URL.revokeObjectURL(attachedImage.url);
+      previewUrlsRef.current.delete(attachedImage.url);
+    }
     setAttachmentError('');
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setAttachedImage({
-        url: e.target.result,
-        name: file.name,
-        type: file.type,
-        file
-      });
-    };
-    reader.onerror = () => setAttachmentError('The selected image could not be read. Please choose it again.');
-    reader.readAsDataURL(file);
+    const previewUrl = URL.createObjectURL(file);
+    previewUrlsRef.current.add(previewUrl);
+    setAttachedImage({
+      url: previewUrl,
+      name: file.name,
+      type: file.type,
+      file
+    });
+  };
+
+  const releasePreviewUrl = (url) => {
+    if (!url?.startsWith('blob:')) return;
+    URL.revokeObjectURL(url);
+    previewUrlsRef.current.delete(url);
   };
 
   const removeAttachedImage = () => {
+    releasePreviewUrl(attachedImage?.url);
     setAttachedImage(null);
     setAttachmentError('');
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -450,38 +470,51 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
     const text = (textToSend !== undefined ? textToSend : inputText).trim();
     const imagePayload = options.image || attachedImage;
 
-    if (!text && !imagePayload) return;
+    if (sendLockRef.current || (!text && !imagePayload)) return;
 
     if (!navigator.onLine) {
       setIsOnline(false);
       return;
     }
+    sendLockRef.current = true;
 
     // Build Farmer User Message Object
-    const farmerMessage = {
+    const existingFarmerMessage = options.isRetry
+      ? messages.find((message) => message.id === options.userMessageId)
+      : null;
+    const farmerMessage = existingFarmerMessage || {
       id: `msg-${Date.now()}`,
       sender: 'farmer',
-      text: text || (imagePayload ? 'Uploaded photograph for analysis' : ''),
+      text: text || (imagePayload ? aiT('imageOnlyPrompt') : ''),
       isVoice: options.isVoice || false,
       voiceDuration: options.voiceDuration || null,
       voiceBlobUrl: options.voiceBlobUrl || null,
       image: imagePayload ? imagePayload.url : null,
+      analysisStatus: imagePayload ? 'UPLOADING' : null,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    setMessages((prev) => [...prev, farmerMessage]);
+    if (!options.isRetry) setMessages((prev) => [...prev, farmerMessage]);
+    else if (imagePayload) {
+      setMessages((current) => current.map((message) => message.id === farmerMessage.id
+        ? { ...message, analysisStatus: 'UPLOADING' }
+        : message));
+    }
     setInputText('');
     setAttachedImage(null);
     setAttachmentError('');
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
     setIsThinking(true);
-    setRequestStage(imagePayload ? 'Uploading image and analyzing it...' : 'Generating an answer...');
+    setRequestStage(imagePayload ? aiT('uploadingImage') : aiT('generating'));
     setLastFailedQuery(null);
 
     // Setup AbortController for cancel / stop generation
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    const imageRequestId = imagePayload
+      ? (options.requestId || window.crypto?.randomUUID?.() || `image-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+      : null;
 
     try {
       const res = await sendMessageToAI({
@@ -490,7 +523,19 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
         history: messages.slice(-10).map((m) => ({ role: m.sender === 'ai' ? 'assistant' : 'user', content: m.text })),
         image: imagePayload || null,
         language: language === 'auto' ? options.detectedLanguage || 'auto' : language,
-        signal: abortController.signal
+        inputType: options.isVoice
+          ? (imagePayload ? 'voice_image' : 'voice')
+          : (imagePayload ? 'image' : 'text'),
+        signal: abortController.signal,
+        requestId: imageRequestId,
+        onUploadComplete: imagePayload
+          ? () => {
+            setRequestStage(aiT('analyzingUploadedImage'));
+            setMessages((current) => current.map((message) => message.id === farmerMessage.id
+              ? { ...message, analysisStatus: 'ANALYZING' }
+              : message));
+          }
+          : undefined
       });
 
       const aiMessage = {
@@ -509,6 +554,23 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
       };
 
       setMessages((prev) => [...prev, aiMessage]);
+      setLastFailedQuery(null);
+      if (imagePayload) {
+        setMessages((current) => current.map((message) => message.id === farmerMessage.id
+          ? {
+            ...message,
+            image: res.imageUrl || message.image,
+            serverMessageId: res.imageMessageId || message.serverMessageId,
+            analysisStatus: 'COMPLETED'
+          }
+          : message));
+        releasePreviewUrl(farmerMessage.image);
+      }
+      if (res.imagePath) {
+        setMessages((prev) => prev.map((message) => message.id === farmerMessage.id
+          ? { ...message, imagePath: res.imagePath }
+          : message));
+      }
 
       // If user submitted via voice, auto-play response for natural voice experience
       if (options.isVoice && preferences.voicePlaybackEnabled) {
@@ -523,17 +585,41 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
       }
 
       console.error('[AIChatView] AI response error:', err);
-      setLastFailedQuery({ text, options: { ...options, image: imagePayload || null } });
+      const errorMessageId = `msg-err-${Date.now()}`;
+      setLastFailedQuery({
+        text,
+        userMessageId: farmerMessage.id,
+        imageMessageId: err.imageMessageId || null,
+        requestId: imageRequestId,
+        errorMessageId,
+        options: { ...options, image: imagePayload || null, requestId: imageRequestId }
+      });
+      if (imagePayload) {
+        setMessages((current) => current.map((message) => message.id === farmerMessage.id
+          ? {
+            ...message,
+            image: err.imageUrl || message.image,
+            serverMessageId: err.imageMessageId || message.serverMessageId,
+            analysisStatus: err.imageMessageId ? 'FAILED' : 'UPLOAD_FAILED'
+          }
+          : message));
+        if (err.imageUrl) releasePreviewUrl(farmerMessage.image);
+      }
 
       const errorMessage = {
-        id: `msg-err-${Date.now()}`,
+        id: errorMessageId,
         sender: 'ai',
         isError: true,
-        text: err.message || t.errorGeneral,
+        text: err.code === 'IMAGE_ANALYSIS_UNAVAILABLE'
+          ? aiT('imageUnavailable')
+          : ['IMAGE_UPLOAD_FAILED', 'CLOUDINARY_NOT_CONFIGURED'].includes(err.code)
+            ? aiT('imageUploadFailed')
+          : err.message || t.errorGeneral,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
+      sendLockRef.current = false;
       setIsThinking(false);
       setRequestStage('');
       abortControllerRef.current = null;
@@ -549,10 +635,81 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
   };
 
   // Retry last failed query (Section 46)
-  const handleRetry = () => {
-    if (!lastFailedQuery) return;
-    const { text, options } = lastFailedQuery;
-    handleSendMessage(text, options);
+  const handleRetry = async (errorMessageId, explicitImageMessageId = null) => {
+    const persistedImageMessage = explicitImageMessageId
+      ? messages.find((message) => message.serverMessageId === explicitImageMessageId)
+      : null;
+    const retry = lastFailedQuery || (persistedImageMessage
+      ? {
+        text: persistedImageMessage.text,
+        userMessageId: persistedImageMessage.id,
+        imageMessageId: persistedImageMessage.serverMessageId,
+        options: {}
+      }
+      : null);
+    if (!retry || sendLockRef.current) return;
+    setMessages((current) => current.filter((message) => message.id !== errorMessageId));
+
+    if (!retry.imageMessageId) {
+      handleSendMessage(retry.text, { ...retry.options, isRetry: true, userMessageId: retry.userMessageId });
+      return;
+    }
+
+    sendLockRef.current = true;
+    const errorId = `msg-err-${Date.now()}`;
+    setIsThinking(true);
+    setRequestStage(aiT('analyzingUploadedImage'));
+    setMessages((current) => current.map((message) => message.serverMessageId === retry.imageMessageId
+      ? { ...message, analysisStatus: 'ANALYZING' }
+      : message));
+    try {
+      const response = await retryAIImageAnalysis({
+        conversationId,
+        messageId: retry.imageMessageId,
+        language
+      });
+      const aiMessage = {
+        id: `msg-${Date.now()}-ai`,
+        serverMessageId: response.messageId || null,
+        conversationPersisted: response.conversationPersisted,
+        sender: 'ai',
+        text: response.reply,
+        language: response.language || language,
+        category: response.category || null,
+        structured: response.structured || null,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        weather: response.weather || null,
+        sources: response.sources || [],
+        intent: response.intent || null
+      };
+      setMessages((current) => [
+        ...current.map((message) => message.serverMessageId === retry.imageMessageId
+          ? { ...message, image: response.imageUrl || message.image, analysisStatus: 'COMPLETED' }
+          : message),
+        aiMessage
+      ]);
+      setLastFailedQuery(null);
+    } catch (error) {
+      setMessages((current) => [
+        ...current.map((message) => message.serverMessageId === retry.imageMessageId
+          ? { ...message, image: error.imageUrl || message.image, analysisStatus: 'FAILED' }
+          : message),
+        {
+          id: errorId,
+          sender: 'ai',
+          isError: true,
+          text: error.code === 'IMAGE_ANALYSIS_UNAVAILABLE'
+            ? aiT('imageUnavailable')
+            : error.message || t.errorGeneral,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+      setLastFailedQuery({ ...retry, imageMessageId: error.imageMessageId || retry.imageMessageId, errorMessageId: errorId });
+    } finally {
+      sendLockRef.current = false;
+      setIsThinking(false);
+      setRequestStage('');
+    }
   };
 
   // Copy AI response to clipboard (Section 135)
@@ -579,7 +736,7 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
       });
       setFeedbackState((prev) => ({ ...prev, [messageId]: type }));
     } catch (error) {
-      setFeedbackError(error.message || 'Feedback could not be saved right now.');
+      setFeedbackError(error.message || aiT('feedbackError'));
     } finally {
       setFeedbackPendingId(null);
     }
@@ -587,31 +744,26 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
 
   // Voice Input: Start Microphone Recording (Section 16, 17, 18)
   const startRecording = async () => {
+    if (voiceConfigLoading) return;
     audioChunksRef.current = [];
-    setSpeechTranscript('');
+    recordingSecondsRef.current = 0;
     setRecordingSeconds(0);
     setVoiceError('');
     let stream;
 
     try {
-      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-        throw new Error('Audio recording is not supported in this browser. Please type your question.');
+      if (!window.MediaRecorder) {
+        throw new Error(t.microphoneUnavailable);
       }
-      if (navigator.permissions?.query) {
-        try {
-          const permission = await navigator.permissions.query({ name: 'microphone' });
-          if (permission.state === 'denied') {
-            const denied = new Error('Microphone access is blocked. Please allow microphone permission in your browser settings.');
-            denied.name = 'NotAllowedError';
-            throw denied;
-          }
-        } catch (permissionError) {
-          if (permissionError.name === 'NotAllowedError') throw permissionError;
-        }
-      }
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const microphoneAccess = await requestMicrophoneAccess({
+        mediaDevices: navigator.mediaDevices,
+        permissions: navigator.permissions
+      });
+      stream = microphoneAccess.stream;
+      voiceDiagnostic('microphonePermission', { state: microphoneAccess.permissionState });
       const supportedType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
-        .find((type) => MediaRecorder.isTypeSupported?.(type));
+        .concat(['audio/ogg', 'audio/wav'])
+        .find((type) => typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(type));
       const mediaRecorder = supportedType
         ? new MediaRecorder(stream, { mimeType: supportedType })
         : new MediaRecorder(stream);
@@ -619,26 +771,40 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
       mediaRecorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           audioChunksRef.current.push(e.data);
+          voiceDiagnostic('audioChunkReceived', { byteSize: e.data.size, mimeType: e.data.type || mediaRecorder.mimeType });
         }
       };
 
       mediaRecorder.onstart = () => {
+        voiceDiagnostic('recordingStarted', { mimeType: mediaRecorder.mimeType });
         setIsRecording(true);
         recordTimerRef.current = setInterval(() => {
-          setRecordingSeconds((prev) => prev + 1);
+          const next = Math.min(recordingSecondsRef.current + 1, maxRecordingSeconds);
+          recordingSecondsRef.current = next;
+          setRecordingSeconds(next);
+          if (next >= maxRecordingSeconds) handleSendRecording();
         }, 1000);
+      };
+      mediaRecorder.onerror = () => {
+        if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+        mediaRecorder.stream?.getTracks().forEach((track) => track.stop());
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+        setVoiceError(t.microphoneStartError);
       };
 
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
     } catch (err) {
       stream?.getTracks().forEach((track) => track.stop());
-      console.error('[Audio Capture Error]:', err);
-      const message = err.name === 'NotAllowedError' || err.name === 'SecurityError'
-        ? 'Microphone access is blocked. Please allow microphone permission in your browser settings.'
+      voiceDiagnostic('recordingStartFailed', { name: err.name, code: err.code });
+      const message = err.code === 'MICROPHONE_UNAVAILABLE'
+        ? t.microphoneUnavailable
+        : err.name === 'NotAllowedError' || err.name === 'SecurityError'
+        ? t.microphoneBlocked
         : err.name === 'NotFoundError'
-          ? 'No microphone was found. Connect a microphone or type your question.'
-          : err.message || 'Unable to start microphone recording. Please try again.';
+          ? t.microphoneNotFound
+          : err.message || t.microphoneStartError;
       setVoiceError(message);
       setIsRecording(false);
     }
@@ -647,26 +813,48 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
   // Upload the recording for server-side transcription before sending the recognized text to chat.
   const handleSendRecording = async () => {
     if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-    const durationStr = `0:${recordingSeconds < 10 ? '0' : ''}${recordingSeconds}`;
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      const recorder = mediaRecorderRef.current;
+    const recordingDuration = recordingSecondsRef.current;
+    const durationStr = `${Math.floor(recordingDuration / 60)}:${String(recordingDuration % 60).padStart(2, '0')}`;
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') {
+      recorder?.stream?.getTracks().forEach((track) => track.stop());
+      mediaRecorderRef.current = null;
+      setVoiceError(t.errorSpeech);
+      setIsRecording(false);
+      recordingSecondsRef.current = 0;
+      setRecordingSeconds(0);
+      return;
+    }
+    if (recorder) {
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        const voiceBlobUrl = URL.createObjectURL(audioBlob);
+        const mimeType = recorder.mimeType || audioChunksRef.current.find((chunk) => chunk.type)?.type || '';
+        const audioBlob = new Blob(audioChunksRef.current, mimeType ? { type: mimeType } : undefined);
         recorder.stream?.getTracks().forEach((track) => track.stop());
         mediaRecorderRef.current = null;
+        voiceDiagnostic('recordingStopped', { byteSize: audioBlob.size, mimeType: audioBlob.type });
         setIsTranscribing(true);
         setVoiceError('');
+        let voiceBlobUrl;
 
         try {
           if (!audioBlob.size) throw new Error(t.errorSpeech);
+          if (!audioBlob.type.startsWith('audio/')) {
+            throw new Error(t.microphoneStartError);
+          }
+          const playbackProbe = new Audio();
+          const playbackMimeType = audioBlob.type.split(';')[0];
+          if (playbackMimeType && playbackProbe.canPlayType(playbackMimeType)) {
+            voiceBlobUrl = URL.createObjectURL(audioBlob);
+          }
           const sttRes = await transcribeVoice({
             audioBlob,
             mimeType: audioBlob.type,
-            language
+            language,
+            durationSeconds: Math.max(1, recordingDuration)
           });
           if (!sttRes?.text?.trim()) throw new Error(t.errorSpeech);
-          setSpeechTranscript(sttRes.text);
+          voiceDiagnostic('transcriptReceived', { received: true });
+          setIsTranscribing(false);
           await handleSendMessage(sttRes.text, {
             isVoice: true,
             voiceDuration: durationStr,
@@ -674,18 +862,30 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
             detectedLanguage: sttRes.detectedLanguage || sttRes.language
           });
         } catch (sttError) {
-          URL.revokeObjectURL(voiceBlobUrl);
-          console.error('[Voice STT Error]:', sttError);
-          setVoiceError(sttError.message || t.errorSpeech);
+          if (voiceBlobUrl) URL.revokeObjectURL(voiceBlobUrl);
+          voiceDiagnostic('transcriptionFailed', { name: sttError.name, code: sttError.code, status: sttError.status });
+          const localizedError = sttError.name === 'TimeoutError'
+            ? t.voiceTimeout
+            : sttError.code === 'API_NETWORK_ERROR'
+              ? t.voiceNetworkError
+              : sttError.message || t.errorSpeech;
+          setVoiceError(localizedError);
         } finally {
           setIsTranscribing(false);
-          setSpeechTranscript('');
         }
       };
-      recorder.stop();
+      try {
+        recorder.stop();
+      } catch {
+        recorder.stream?.getTracks().forEach((track) => track.stop());
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+        setVoiceError(t.microphoneStartError);
+      }
     }
 
     setIsRecording(false);
+    recordingSecondsRef.current = 0;
     setRecordingSeconds(0);
   };
 
@@ -698,111 +898,202 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
     }
     mediaRecorderRef.current = null;
     setIsRecording(false);
-    setSpeechTranscript('');
+    recordingSecondsRef.current = 0;
     setRecordingSeconds(0);
   };
 
-  // Text-To-Speech Play / Pause / Resume / Stop (Section 19, 20, 21)
+  // Stream synthesized speech so playback can begin before the full answer is generated.
   const handlePlayAudio = async (messageId, textToRead, msgLang) => {
+    if (preparingMessageId === messageId) {
+      handleStopAudio();
+      return;
+    }
     if (playingMessageId === messageId) {
       const audio = activeAudioElementRef.current;
-      if (audio) {
-        if (audio.paused) {
+      if (!audio) return;
+      if (audio.paused) {
+        try {
           await audio.play();
           setIsPaused(false);
-        } else {
-          audio.pause();
-          setIsPaused(true);
+        } catch (error) {
+          setVoiceError(error.message || aiT('audioResumeError'));
         }
       } else {
-        if (isPaused) {
-          window.speechSynthesis?.resume();
-          setIsPaused(false);
-        } else {
-          window.speechSynthesis?.pause();
-          setIsPaused(true);
-        }
+        audio.pause();
+        setIsPaused(true);
       }
       return;
     }
 
     handleStopAudio();
     setVoiceError('');
+    setPreparingMessageId(messageId);
+    voiceDiagnostic('listenClicked');
+    const startedAt = highResolutionNow();
+    const controller = new AbortController();
+    ttsAbortControllerRef.current = controller;
+    let voiceStartTimedOut = false;
+    let audioStarted = false;
+    let timeoutId = window.setTimeout(() => {
+      voiceStartTimedOut = true;
+      controller.abort();
+      if (activeAudioElementRef.current === audio) {
+        void ttsReaderRef.current?.cancel().catch(() => {});
+        audio?.pause();
+        setVoiceError(aiT('audioPrepareTimeout'));
+        setPlayingMessageId(null);
+        setPreparingMessageId(null);
+        setIsPaused(false);
+        activeAudioElementRef.current = null;
+        mediaSourceRef.current = null;
+        if (audioObjectUrlRef.current) URL.revokeObjectURL(audioObjectUrlRef.current);
+        audioObjectUrlRef.current = null;
+      }
+    }, 15000);
+    const finishPlayback = () => {
+      setPlayingMessageId(null);
+      setPreparingMessageId(null);
+      setIsPaused(false);
+      activeAudioElementRef.current = null;
+      mediaSourceRef.current = null;
+      if (audioObjectUrlRef.current) URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
+    };
+    let audio = null;
+
     try {
-      const response = await speakVoice({ text: textToRead, language: msgLang || 'en' });
-      if (response.audioBase64) {
-        const audio = new Audio(`data:${response.format || 'audio/mpeg'};base64,${response.audioBase64}`);
-        activeAudioElementRef.current = audio;
-        audio.onended = () => {
-          setPlayingMessageId(null);
-          setIsPaused(false);
-          activeAudioElementRef.current = null;
-        };
-        audio.onerror = () => {
-          setPlayingMessageId(null);
-          setIsPaused(false);
-          activeAudioElementRef.current = null;
-          setVoiceError('Audio playback failed. The response is still available as text.');
-        };
-        await audio.play();
+      if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/mpeg')) {
+        throw new Error(aiT('streamingAudioUnsupported'));
+      }
+      const mediaSource = new MediaSource();
+      mediaSourceRef.current = mediaSource;
+      const objectUrl = URL.createObjectURL(mediaSource);
+      audioObjectUrlRef.current = objectUrl;
+      audio = new Audio(objectUrl);
+      activeAudioElementRef.current = audio;
+      audio.onended = finishPlayback;
+      audio.onerror = () => {
+        finishPlayback();
+        setVoiceError(aiT('audioPlaybackError'));
+      };
+      audio.onplaying = () => {
+        audioStarted = true;
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+        setPreparingMessageId(null);
         setPlayingMessageId(messageId);
         setIsPaused(false);
-        return;
+        voiceDiagnostic('playbackStarted', { elapsedMs: Math.round(highResolutionNow() - startedAt) });
+      };
+
+      const sourceOpen = new Promise((resolve, reject) => {
+        mediaSource.addEventListener('sourceopen', () => {
+          voiceDiagnostic('ttsMediaSourceOpen', { elapsedMs: Math.round(highResolutionNow() - startedAt) });
+          resolve();
+        }, { once: true });
+        mediaSource.addEventListener('error', () => reject(new Error(aiT('audioPlaybackError'))), { once: true });
+      });
+      const responsePromise = speakVoiceStream({
+        text: textToRead,
+        language: msgLang || 'en',
+        signal: controller.signal
+      });
+      const [, response] = await Promise.all([sourceOpen, responsePromise]);
+      voiceDiagnostic('ttsResponseHeadersReceived', { elapsedMs: Math.round(highResolutionNow() - startedAt) });
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error?.message || aiT('audioPlaybackError'));
       }
 
-      if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
-        throw new Error('Speech playback is not supported in this browser. The response is still available as text.');
-      }
-      const locale = response.voiceLocale || 'en-IN';
-      let voices = window.speechSynthesis.getVoices();
-      if (!voices.length) {
-        voices = await new Promise((resolve) => {
-          const timeout = setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1500);
-          window.speechSynthesis.onvoiceschanged = () => {
-            clearTimeout(timeout);
-            resolve(window.speechSynthesis.getVoices());
-          };
+      const sourceBuffer = mediaSource.addSourceBuffer(response.headers.get('Content-Type')?.split(';')[0] || 'audio/mpeg');
+      const reader = response.body.getReader();
+      ttsReaderRef.current = reader;
+      let firstChunk = true;
+      let playbackStarted = false;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        if (firstChunk) {
+          firstChunk = false;
+          voiceDiagnostic('firstAudioChunkReceived', {
+            elapsedMs: Math.round(highResolutionNow() - startedAt),
+            bytes: value.byteLength
+          });
+        }
+        await new Promise((resolve, reject) => {
+          sourceBuffer.addEventListener('updateend', resolve, { once: true });
+          sourceBuffer.addEventListener('error', () => reject(new Error(aiT('audioPlaybackError'))), { once: true });
+          try {
+            sourceBuffer.appendBuffer(value);
+          } catch (error) {
+            reject(error);
+          }
         });
+        if (!playbackStarted) {
+          playbackStarted = true;
+          void audio.play().catch((error) => {
+            if (activeAudioElementRef.current !== audio) return;
+            handleStopAudio();
+            setVoiceError(error.message || aiT('audioPlaybackError'));
+          });
+        }
       }
-      const selectedVoice = voices.find((voice) => voice.lang.toLowerCase() === locale.toLowerCase());
-      const compatibleVoice = selectedVoice || voices.find((voice) => voice.lang.toLowerCase().startsWith(locale.slice(0, 2).toLowerCase()));
-      if (!compatibleVoice) {
-        throw new Error(`No ${locale} voice is installed. Configure Google Cloud TTS for multilingual voice playback.`);
-      }
-      const utterance = new SpeechSynthesisUtterance(response.speechText || textToRead);
-      utterance.voice = compatibleVoice;
-      utterance.lang = locale;
-      utterance.rate = 0.92;
-      utterance.onend = () => {
-        setPlayingMessageId(null);
-        setIsPaused(false);
-      };
-      utterance.onerror = () => {
-        setPlayingMessageId(null);
-        setIsPaused(false);
-        setVoiceError('Speech playback failed. The response is still available as text.');
-      };
-      currentUtteranceRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
-      setPlayingMessageId(messageId);
-      setIsPaused(false);
+      if (firstChunk) throw new Error(aiT('audioPlaybackError'));
+      if (mediaSource.readyState === 'open' && !sourceBuffer.updating) mediaSource.endOfStream();
+      ttsReaderRef.current = null;
+      if (!audio.paused) setPlayingMessageId(messageId);
     } catch (error) {
-      console.error('[TTS Error]:', error);
+      if (error.name !== 'AbortError') {
+        console.error('[TTS Error]:', error);
+      }
+      if (voiceStartTimedOut) {
+        setVoiceError(aiT('audioPrepareTimeout'));
+      } else if (error.name !== 'AbortError') {
+        setVoiceError(error.voiceAvailable
+          ? translate(uiLanguage, 'voice.unavailable')
+          : error.message || aiT('audioPlaybackError'));
+      }
+      if (audio) audio.pause();
+      if (ttsReaderRef.current) {
+        await ttsReaderRef.current.cancel().catch(() => {});
+        ttsReaderRef.current = null;
+      }
+      if (audioObjectUrlRef.current) URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
+      mediaSourceRef.current = null;
+      activeAudioElementRef.current = null;
       setPlayingMessageId(null);
+      setPreparingMessageId(null);
       setIsPaused(false);
-      setVoiceError(error.message || 'Speech playback failed. The response is still available as text.');
+    } finally {
+      if (audioStarted || !audio) window.clearTimeout(timeoutId);
+      if (ttsAbortControllerRef.current === controller) ttsAbortControllerRef.current = null;
     }
   };
 
   const handleStopAudio = () => {
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+    ttsAbortControllerRef.current?.abort();
+    ttsAbortControllerRef.current = null;
+    if (ttsReaderRef.current) {
+      void ttsReaderRef.current.cancel().catch(() => {});
+      ttsReaderRef.current = null;
     }
     if (activeAudioElementRef.current) {
+      activeAudioElementRef.current.onended = null;
+      activeAudioElementRef.current.onerror = null;
+      activeAudioElementRef.current.onplaying = null;
       activeAudioElementRef.current.pause();
+      activeAudioElementRef.current.currentTime = 0;
+      activeAudioElementRef.current.removeAttribute('src');
+      activeAudioElementRef.current.load();
       activeAudioElementRef.current = null;
     }
+    if (audioObjectUrlRef.current) URL.revokeObjectURL(audioObjectUrlRef.current);
+    audioObjectUrlRef.current = null;
+    mediaSourceRef.current = null;
     setPlayingMessageId(null);
+    setPreparingMessageId(null);
     setIsPaused(false);
   };
 
@@ -812,11 +1103,97 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
     handleStopAudio();
     const audio = new Audio(blobUrl);
     activeAudioElementRef.current = audio;
-    audio.play();
+    audio.play().catch((error) => {
+      console.warn('[AIChatView] Recorded voice playback failed:', error.message);
+      setVoiceError(aiT('recordedPlaybackError'));
+    });
   };
 
+  const startLiveVoice = async () => {
+    if (liveSessionRef.current || !farmId || isRecording || isThinking || isTranscribing) return;
+    const startId = ++liveStartIdRef.current;
+    setLiveError('');
+    setLiveTranscript('');
+    setLivePartialTranscript('');
+    setLiveSessionSeconds(0);
+    setLiveMuted(false);
+    setLiveStatus('connecting');
+    try {
+      const sessionConfig = await getLiveVoiceToken({ language: uiLanguage, farmId });
+      if (startId !== liveStartIdRef.current) return;
+      setLiveMaxMinutes(sessionConfig.maxMinutes || 30);
+      const sessionFarmId = sessionConfig.farmId || farmId;
+      const session = await connectGeminiLiveVoice({
+        token: sessionConfig.token,
+        setup: sessionConfig.setup,
+        onStatus: (status) => {
+          setLiveStatus(status);
+          if (status === 'disconnected') liveSessionRef.current = null;
+        },
+        onTranscript: (text, isFinal, role) => {
+          if (isFinal) {
+            setLiveTranscript((previous) => `${previous}${previous ? '\n' : ''}${text}`.slice(-3000));
+            setLivePartialTranscript('');
+            saveLiveVoiceMessage({
+              conversationId,
+              role,
+              message: text,
+              language: uiLanguage,
+              farmId: sessionFarmId
+            }).catch((error) => {
+              console.error('[AgriShield Live Voice] Transcript could not be saved:', error.message);
+              setLiveError(error.message || 'The Live Voice transcript could not be saved.');
+            });
+          } else {
+            setLivePartialTranscript(text);
+          }
+        },
+        onError: (error) => setLiveError(error.message || t.liveUnavailable)
+      });
+      if (startId !== liveStartIdRef.current) {
+        session.stop();
+        return;
+      }
+      liveSessionRef.current = session;
+    } catch (error) {
+      if (startId !== liveStartIdRef.current) return;
+      console.error('[AgriShield Live Voice] Session could not start:', error);
+      setLiveStatus('disconnected');
+      setLiveError(error.message || t.liveUnavailable);
+    }
+  };
+
+  const endLiveVoice = ({ closeDialog = false } = {}) => {
+    liveStartIdRef.current += 1;
+    liveSessionRef.current?.stop();
+    liveSessionRef.current = null;
+    setLiveStatus('idle');
+    setLiveMuted(false);
+    setLiveSessionSeconds(0);
+    setLivePartialTranscript('');
+    if (closeDialog) setLiveDialogOpen(false);
+  };
+
+  const toggleLiveMute = () => {
+    const nextMuted = !liveMuted;
+    liveSessionRef.current?.setMuted(nextMuted);
+    setLiveMuted(nextMuted);
+  };
+
+  useEffect(() => {
+    if (!['listening', 'thinking', 'speaking'].includes(liveStatus)) return undefined;
+    const timer = window.setInterval(() => setLiveSessionSeconds((seconds) => seconds + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [liveStatus]);
+
+  useEffect(() => {
+    if (!liveSessionRef.current || liveSessionSeconds < liveMaxMinutes * 60) return;
+    endLiveVoice();
+    setLiveError(t.liveTimeLimit);
+  }, [liveSessionSeconds, liveMaxMinutes, t.liveTimeLimit]);
+
   return (
-    <div className="agrishield-conversation-screen animate-fadeIn">
+    <div className="agrishield-conversation-screen ai-chat-surface animate-fadeIn">
       {/* 1. TOP HEADER WITH BRANDING, NEW CHAT, LANGUAGE SELECTOR, AND PROFILE */}
       <header className="ai-chat-header">
         <div className="header-left">
@@ -825,27 +1202,28 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
           </div>
           <div>
             <div className="title-row">
-              <h2 className="ai-brand-heading">AgriShield-AI</h2>
-              <span className="live-engine-tag">{t.assistantLabel}</span>
+              <h2 className="ai-brand-heading">AgriShield AI</h2>
             </div>
             <p className="ai-brand-sub">{t.assistantSub}</p>
+            {farmId && <p className="ai-farm-context">{farmContextLabel}</p>}
           </div>
         </div>
 
         <div className="header-right">
           <button
             type="button"
-            className="ai-header-weather-button"
-            onClick={onOpenWeatherMap}
-            title={t.openWeatherMap}
-            aria-label={t.openWeatherMap}
+            className="ai-header-live-button"
+            onClick={() => setLiveDialogOpen(true)}
+            disabled={isRecording || isThinking || isTranscribing}
+            title={t.liveVoice}
+            aria-label={t.liveVoice}
           >
-            <CloudRain size={17} aria-hidden="true" />
-            <span>{t.weatherMap}</span>
+            <Mic size={16} aria-hidden="true" />
+            <span>{t.liveVoice}</span>
           </button>
-          {/* + New Chat Button (Section 138, 139) */}
           <button 
             className="btn-new-chat"
+            type="button"
             onClick={handleNewChat}
             title={t.newChat}
             aria-label={t.newChat}
@@ -898,19 +1276,79 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
               </div>
             )}
           </div>
-
-          {/* Farmer Profile Badge */}
-          <div className="header-farmer-badge" title={t.farmerProfile}>
-            <div className="farmer-badge-avatar">
-              <User size={15} />
-            </div>
-            <div className="farmer-badge-texts">
-              <span className="farmer-name">{profile?.farmerName || t.farmer}</span>
-              <span className="farmer-crop">{profile?.farm?.crop || t.cropNotSpecified}</span>
-            </div>
-          </div>
         </div>
       </header>
+
+      {liveDialogOpen && (
+        <div className="live-voice-backdrop">
+          <section className="live-voice-dialog" role="dialog" aria-modal="true" aria-labelledby="live-voice-title">
+            <header className="live-voice-dialog-header">
+              <div className="live-voice-heading">
+                <span className={`live-voice-status-dot ${liveStatus}`} aria-hidden="true" />
+                <div>
+                  <h3 id="live-voice-title">{t.liveVoice}</h3>
+                  <span aria-live="polite">
+                    {liveStatus === 'connecting' ? t.liveConnecting :
+                      liveStatus === 'listening' ? t.liveListening :
+                        liveStatus === 'thinking' ? t.liveThinking :
+                          liveStatus === 'speaking' ? t.liveSpeaking :
+                            liveStatus === 'disconnected' ? t.liveUnavailable :
+                              liveStatus === 'idle' ? t.liveReady : t.liveConnected}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="live-voice-close"
+                onClick={() => endLiveVoice({ closeDialog: true })}
+                aria-label={t.close}
+                title={t.close}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <p className="live-voice-intro">{t.liveIntro}</p>
+            {liveStatus !== 'idle' && liveStatus !== 'disconnected' && (
+              <div className="live-voice-duration" aria-live="off">
+                {String(Math.floor(liveSessionSeconds / 60)).padStart(2, '0')}:{String(liveSessionSeconds % 60).padStart(2, '0')}
+                <span> / {liveMaxMinutes}:00</span>
+              </div>
+            )}
+            <div className="live-voice-transcript" aria-label={t.liveTranscript} aria-live="polite">
+              <strong>{t.liveTranscript}</strong>
+              <p>{liveTranscript || livePartialTranscript
+                ? [liveTranscript, livePartialTranscript].filter(Boolean).join('\n')
+                : t.liveIntro}</p>
+            </div>
+            {liveError && <p className="live-voice-error" role="alert">{liveError}</p>}
+            <div className="live-voice-controls">
+              {['idle', 'disconnected'].includes(liveStatus) ? (
+                <button type="button" className="live-voice-start" onClick={startLiveVoice}>
+                  <Mic size={17} />
+                  <span>{t.startLive}</span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="live-voice-mute"
+                    onClick={toggleLiveMute}
+                    aria-pressed={liveMuted}
+                    disabled={liveStatus === 'connecting'}
+                  >
+                    {liveMuted ? <Mic size={17} /> : <MicOff size={17} />}
+                    <span>{liveMuted ? t.resumeMic : t.mute}</span>
+                  </button>
+                  <button type="button" className="live-voice-end" onClick={() => endLiveVoice({ closeDialog: true })}>
+                    <PhoneOff size={17} />
+                    <span>{t.endLive}</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Offline Alert Banner */}
       {!isOnline && (
@@ -928,8 +1366,9 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
             <div className="welcome-avatar-large">
               <Bot size={32} aria-hidden="true" />
             </div>
-            <h3 className="welcome-title">{t.welcomeTitle}</h3>
-            <p className="welcome-sub">{t.welcomeSub}</p>
+            <h3 className="welcome-title">{aiT('emptyTitle')}</h3>
+            <p className="welcome-sub">{aiT('emptySubtitle')}</p>
+            <p className="ai-empty-prompt">{aiT('emptyPrompt')}</p>
           </div>
         )}
 
@@ -952,11 +1391,11 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
               {/* Farmer Voice Message Player (Section 18) */}
               {m.sender === 'farmer' && m.isVoice && (
                 <div className="farmer-voice-bubble">
-                  <div className="voice-audio-bar">
+                  {m.voiceBlobUrl && <div className="voice-audio-bar">
                     <button 
                       className="voice-play-icon"
                       onClick={() => handlePlayFarmerVoice(m.voiceBlobUrl)}
-                      title="Play recorded audio"
+                      title={aiT('playRecordedAudio')}
                       style={{ border: 'none', cursor: 'pointer' }}
                     >
                       <Play size={15} aria-hidden="true" />
@@ -970,7 +1409,7 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
                       <span className="timeline-bar"></span>
                     </div>
                     <span className="voice-duration">{m.voiceDuration || '0:06'}</span>
-                  </div>
+                  </div>}
                   {m.text && (
                     <div className="voice-recognized-confirmation">
                       <span className="confirmation-label">{t.voiceBubblePrefix}:</span>
@@ -981,11 +1420,39 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
               )}
 
               {/* Farmer Uploaded Image Attachment (Section 22, 23) */}
-              {m.image && (
+              {(m.image || m.imageUrl) && (
                 <div className="message-image-attachment">
-                  <img src={m.image} alt="Crop sample" className="attached-crop-image" />
-                  <span className="image-tag"><ImageIcon size={14} aria-hidden="true" /> Crop photo</span>
+                  <img src={m.image || m.imageUrl} alt={aiT('cropSample')} className="attached-crop-image" />
+                  <span className="image-tag"><ImageIcon size={14} aria-hidden="true" /> {aiT('cropPhoto')}</span>
                 </div>
+              )}
+              {m.analysisStatus && !(isThinking && ['UPLOADING', 'ANALYZING'].includes(m.analysisStatus)) && (
+                <div className={`ai-image-processing-status ${m.analysisStatus.toLowerCase()}`} role="status">
+                  {m.analysisStatus === 'UPLOADING'
+                    ? aiT('uploadingImage')
+                    : m.analysisStatus === 'ANALYZING'
+                      ? aiT('analyzingUploadedImage')
+                      : m.analysisStatus === 'COMPLETED'
+                        ? aiT('analysisComplete')
+                        : m.analysisStatus === 'FAILED'
+                          ? aiT('analysisFailed')
+                          : aiT('imageUploadFailed')}
+                </div>
+              )}
+              {m.sender === 'farmer' && m.analysisStatus === 'FAILED' &&
+                (!lastFailedQuery || lastFailedQuery.imageMessageId !== m.serverMessageId) && (
+                  <div className="error-retry-action">
+                    <button
+                      className="btn-retry-query"
+                      onClick={() => handleRetry(`retry-${m.id}`, m.serverMessageId)}
+                    >
+                      <RefreshCw size={14} aria-hidden="true" />
+                      <span>{t.tryAgain}</span>
+                    </button>
+                  </div>
+                )}
+              {!m.image && m.imagePath && (
+                <div className="image-tag"><ImageIcon size={14} aria-hidden="true" /> {aiT('cropPhotoAttached')}</div>
               )}
 
               {/* Text Message Content */}
@@ -993,7 +1460,7 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
                 <div className={`message-bubble ${m.sender} ${m.isError ? 'error-bubble' : ''}`}>
                   {m.sender === 'ai' && (
                     <div className="ai-response-meta-header">
-                      <span className="ai-sender-name"><Bot size={15} aria-hidden="true" /> AgriShield-AI</span>
+                      <span className="ai-sender-name"><Bot size={15} aria-hidden="true" /> AgriShield AI</span>
                       {m.category && (
                         <span className="ai-category-pill">{m.category}</span>
                       )}
@@ -1038,7 +1505,7 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
                       {m.sources?.length > 0 && (
                         <div className="sources-phase2-badge">
                           <ShieldCheck size={13} color="#94a3b8" />
-                          <span>{m.intent === 'WEATHER' ? 'Weather data: ' : 'Sources: '}{m.sources.map((source) => (
+                          <span>{m.intent === 'WEATHER' ? `${aiT('weatherData')} ` : `${aiT('sources')} `}{m.sources.map((source) => (
                             <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
                               {source.publisher || source.title}
                             </a>
@@ -1047,13 +1514,16 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
                       )}
                       {m.conversationPersisted === false && (
                         <p className="ai-chat-input-status error" role="status">
-                          This conversation could not be saved because conversation storage is unavailable.
+                          {aiT('conversationNotSaved')}
                         </p>
                       )}
                       {m.weather?.available && (
                         <div className="weather-data-badge" title={`Retrieved ${m.weather.timestamp}`}>
                           <CloudRain size={13} color="#94a3b8" />
-                          <span>Weather data · {m.weather.provider} · Updated {new Date(m.weather.timestamp).toLocaleString()}</span>
+                          <span>{aiT('weatherMeta', {
+                            provider: m.weather.provider,
+                            date: new Date(m.weather.timestamp).toLocaleString()
+                          })}</span>
                         </div>
                       )}
                     </div>
@@ -1061,81 +1531,76 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
 
                   {/* Response Actions Bar: TTS, Copy & Feedback (Section 19, 21, 135, 136) */}
                   {m.sender === 'ai' && !m.isError && (
-                    <div className="ai-card-actions-bar">
-                      <div className="actions-left">
-                        {/* Audio Controls */}
-                        {playingMessageId === m.id ? (
-                          <div className="active-player-controls">
-                            <button 
-                              className="btn-audio-control pause"
-                              onClick={() => handlePlayAudio(m.id, m.text, m.language)}
-                              title={isPaused ? t.resume : t.pause}
-                            >
-                              {isPaused ? <Play size={13} /> : <Pause size={13} />}
-                              <span>{isPaused ? t.resume : t.pause}</span>
-                            </button>
-                            <button 
-                              className="btn-audio-control stop"
-                              onClick={handleStopAudio}
-                              title={t.stop}
-                            >
-                              <Square size={12} />
-                              <span>{t.stop}</span>
-                            </button>
-                            <span className="audio-playing-indicator animate-pulse">
-                            Speaking in {m.language === 'te' ? 'తెలుగు' : (m.language === 'hi' ? 'हिंदी' : 'English')}...
-                            </span>
-                          </div>
-                        ) : (
-                          <button 
-                            className="btn-audio-control play"
-                            onClick={() => handlePlayAudio(m.id, m.text, m.language)}
-                            title={t.listen}
+                    <div className="ai-card-actions-bar ai-compact-actions">
+                      <button
+                        type="button"
+                        className="ai-listen-action"
+                        onClick={() => handlePlayAudio(m.id, m.text, m.language)}
+                        aria-label={preparingMessageId === m.id
+                          ? aiT('preparingVoice')
+                          : playingMessageId === m.id ? (isPaused ? t.resume : t.pause) : t.listen}
+                        title={preparingMessageId === m.id
+                          ? aiT('preparingVoice')
+                          : playingMessageId === m.id ? (isPaused ? t.resume : t.pause) : t.listen}
+                      >
+                        {preparingMessageId === m.id
+                          ? <StopCircle size={15} aria-hidden="true" />
+                          : playingMessageId === m.id && !isPaused
+                          ? <Pause size={15} aria-hidden="true" />
+                          : <Play size={15} aria-hidden="true" />}
+                      </button>
+                      {preparingMessageId === m.id && (
+                        <span className="ai-speaking-status" role="status">{aiT('preparingVoice')}</span>
+                      )}
+                      {playingMessageId === m.id && (
+                        <span className="ai-speaking-status" role="status">
+                          {aiT('speakingIn', {
+                            language: m.language === 'te' ? 'తెలుగు' : m.language === 'hi' ? 'हिंदी' : 'English'
+                          })}
+                        </span>
+                      )}
+                      <details className="ai-message-actions-menu">
+                        <summary aria-label={aiT('messageActions')} title={aiT('messageActions')}>
+                          <MoreHorizontal size={17} aria-hidden="true" />
+                        </summary>
+                        <div className="ai-message-actions-list">
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(m.id, m.text)}
+                            aria-label={copiedId === m.id ? t.copied : t.copy}
                           >
-                            <Play size={13} />
-                            <span>{t.listen}</span>
+                            {copiedId === m.id ? <Check size={15} /> : <Copy size={15} />}
+                            <span>{copiedId === m.id ? t.copied : t.copy}</span>
                           </button>
-                        )}
-
-                        {/* Copy Response Button */}
-                        <button 
-                          className={`btn-text-action ${copiedId === m.id ? 'copied' : ''}`}
-                          onClick={() => handleCopy(m.id, m.text)}
-                          title="Copy advice"
-                        >
-                          {copiedId === m.id ? <Check size={12} /> : <Copy size={12} />}
-                          <span>{copiedId === m.id ? t.copied : t.copy}</span>
-                        </button>
-                      </div>
-
-                      <div className="actions-right">
-                        {/* Helpful Feedback Buttons */}
-                        <button 
-                          className={`feedback-btn ${feedbackState[m.id] === 'up' ? 'active' : ''}`}
-                          onClick={() => handleFeedback(m.id, 'up')}
-                          title="Helpful response"
-                          aria-label="Mark response as helpful"
-                          disabled={feedbackPendingId === m.id}
-                        >
-                          <ThumbsUp size={13} />
-                        </button>
-                        <button 
-                          className={`feedback-btn ${feedbackState[m.id] === 'down' ? 'active' : ''}`}
-                          onClick={() => handleFeedback(m.id, 'down')}
-                          title="Not helpful"
-                          aria-label="Mark response as not helpful"
-                          disabled={feedbackPendingId === m.id}
-                        >
-                          <ThumbsDown size={13} />
-                        </button>
-                      </div>
+                          <button
+                            type="button"
+                            className={feedbackState[m.id] === 'up' ? 'active' : ''}
+                            onClick={() => handleFeedback(m.id, 'up')}
+                            aria-label={aiT('helpful')}
+                            disabled={feedbackPendingId === m.id}
+                          >
+                            <ThumbsUp size={15} />
+                            <span>{aiT('helpful')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={feedbackState[m.id] === 'down' ? 'active' : ''}
+                            onClick={() => handleFeedback(m.id, 'down')}
+                            aria-label={aiT('notHelpful')}
+                            disabled={feedbackPendingId === m.id}
+                          >
+                            <ThumbsDown size={15} />
+                            <span>{aiT('notHelpful')}</span>
+                          </button>
+                        </div>
+                      </details>
                     </div>
                   )}
 
                   {/* Error Retry Button (Section 46) */}
                   {m.isError && (
                     <div className="error-retry-action">
-                      <button className="btn-retry-query" onClick={handleRetry}>
+                      <button className="btn-retry-query" onClick={() => handleRetry(m.id)}>
                         <RefreshCw size={14} />
                         <span>{t.tryAgain}</span>
                       </button>
@@ -1177,66 +1642,29 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
         )}
       </div>
 
-      {/* 4. VOICE RECORDING VISUALIZER OVERLAY (Section 16, 17, 18) */}
-      {isRecording && (
-        <div className="voice-recording-modal animate-slideUp">
-          <div className="recording-indicator-row">
-            <div className="recording-pulsing-badge">
-              <span className="red-record-dot"></span>
-              <span className="record-label">{t.recording}</span>
-            </div>
-            <span className="recording-timer">0:{recordingSeconds < 10 ? '0' : ''}{recordingSeconds}</span>
-          </div>
-
-          {/* Animated Waveform Visualizer */}
-          <div className="waveform-visualizer">
-            <div className="wave-bar bar-1"></div>
-            <div className="wave-bar bar-2"></div>
-            <div className="wave-bar bar-3"></div>
-            <div className="wave-bar bar-4"></div>
-            <div className="wave-bar bar-5"></div>
-            <div className="wave-bar bar-6"></div>
-            <div className="wave-bar bar-7"></div>
-            <div className="wave-bar bar-8"></div>
-          </div>
-
-          <p className="speech-live-preview">
-            {speechTranscript ? `"${speechTranscript}"` : t.recordingSub}
-          </p>
-
-          <div className="recording-controls-row">
-            <button className="btn-record-cancel" onClick={handleCancelRecording}>
-              <X size={16} />
-              <span>{t.cancel}</span>
-            </button>
-            <button className="btn-record-send" onClick={handleSendRecording}>
-              <Send size={16} />
-              <span>{t.send}</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 5. ATTACHED IMAGE PREVIEW BAR (Section 132, 197) */}
-      {attachedImage && !isRecording && (
+      {attachedImage && (
         <div className="attached-image-preview-bar animate-fadeIn">
           <div className="preview-image-box">
-            <img src={attachedImage.url} alt="Attached crop" />
-            <button className="btn-remove-attachment" onClick={removeAttachedImage} title="Remove image">
+            <img src={attachedImage.url} alt={aiT('cropSample')} />
+            <button
+              type="button"
+              className="btn-remove-attachment"
+              onClick={removeAttachedImage}
+              title={aiT('removeImage')}
+              aria-label={aiT('removeImageAction')}
+            >
               <X size={12} />
             </button>
           </div>
-          <span className="preview-filename">{attachedImage.name} (Ready to send)</span>
+          <span className="preview-filename">{attachedImage.name} ({aiT('readyToSend')})</span>
         </div>
       )}
       {attachmentError && <div className="ai-chat-input-status error" role="alert">{attachmentError}</div>}
       {voiceError && <div className="ai-chat-input-status error" role="alert">{voiceError}</div>}
       {feedbackError && <div className="ai-chat-input-status error" role="alert">{feedbackError}</div>}
-      {isTranscribing && <div className="ai-chat-input-status" role="status">Processing voice recording and detecting language...</div>}
+      {isTranscribing && <div className="ai-chat-input-status" role="status">{t.transcribing}</div>}
 
-      {/* 6. INPUT BAR (Camera, Gallery, Text, Mic, Send) (Section 42, 131, 194, 195) */}
       <footer className="ai-chat-input-footer">
-        {/* Hidden File Inputs */}
         <input 
           type="file" 
           ref={fileInputRef} 
@@ -1259,70 +1687,100 @@ export default function AIChatView({ farmerId, profile = {}, initialLanguage = '
           }}
         />
 
-        {/* Camera Direct Button (Section 131) */}
-        <button 
-          type="button" 
-          className="btn-input-accessory camera"
-          onClick={() => cameraInputRef.current?.click()}
-          title="Take photo of crop leaf with camera"
-          aria-label="Take crop photo with camera"
-          disabled={isRecording || isThinking || isTranscribing}
-        >
-          <Camera size={20} />
-        </button>
+        {isRecording ? (
+          <div className="ai-recording-controls" role="status">
+            <span className="recording-pulsing-badge">
+              <span className="red-record-dot" aria-hidden="true" />
+              <span>{aiT('recordingStatus', {
+                time: `${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, '0')}`
+              })}</span>
+            </span>
+            <button type="button" className="btn-record-cancel" onClick={handleCancelRecording}>
+              <X size={15} aria-hidden="true" />
+              <span>{t.cancel}</span>
+            </button>
+            <button type="button" className="btn-record-send" onClick={handleSendRecording}>
+              <Square size={15} aria-hidden="true" />
+              <span>{t.stopAndTranscribe}</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="ai-attach-menu">
+              <button
+                type="button"
+                className="btn-input-accessory ai-attach-trigger"
+                onClick={() => setAttachMenuOpen((open) => !open)}
+                aria-expanded={attachMenuOpen}
+                aria-label={aiT('attachPhoto')}
+                title={aiT('attachPhoto')}
+                disabled={isThinking || isTranscribing}
+              >
+                <ImageIcon size={19} aria-hidden="true" />
+              </button>
+              {attachMenuOpen && (
+                <div className="ai-attach-options" role="group" aria-label={aiT('attachPhoto')}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      cameraInputRef.current?.click();
+                    }}
+                  >
+                    <Camera size={16} aria-hidden="true" />
+                    <span>{aiT('takePhoto')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    <ImageIcon size={16} aria-hidden="true" />
+                    <span>{aiT('chooseImage')}</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
-        {/* Gallery Image Upload Button */}
-        <button 
-          type="button" 
-          className="btn-input-accessory gallery"
-          onClick={() => fileInputRef.current?.click()}
-          title="Choose photo from gallery"
-          aria-label="Upload photo from gallery"
-          disabled={isRecording || isThinking || isTranscribing}
-        >
-          <ImageIcon size={20} />
-        </button>
-
-        {/* Chat Text Input Form */}
-        <form 
-          className="input-form-inner"
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSendMessage();
-          }}
-        >
-          <input 
-            type="text" 
-            className="farmer-text-input"
-            placeholder={t.placeholder}
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            disabled={isRecording || isThinking || isTranscribing}
-          />
-
-          {/* Microphone Voice Button (Section 194) */}
-          <button 
-            type="button"
-            className={`btn-input-accessory mic ${isRecording ? 'recording-active' : ''}`}
-            onClick={isRecording ? handleCancelRecording : startRecording}
-            title="Speak into microphone"
-            aria-label="Record voice query"
-            disabled={isThinking || isTranscribing}
-          >
-            <Mic size={20} />
-          </button>
-
-          {/* Send Button (Section 195) */}
-          <button 
-            type="submit" 
-            className="btn-send-message"
-            disabled={(!inputText.trim() && !attachedImage) || isRecording || isThinking || isTranscribing}
-            title="Send query"
-            aria-label="Send message"
-          >
-            <Send size={18} />
-          </button>
-        </form>
+            <form
+              className="input-form-inner"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendMessage();
+              }}
+            >
+              <input
+                type="text"
+                className="farmer-text-input"
+                placeholder={t.placeholder}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                disabled={isThinking || isTranscribing}
+              />
+              <button
+                type="button"
+                className="btn-input-accessory mic"
+                onClick={startRecording}
+                title={aiT('startRecording')}
+                aria-label={aiT('startRecording')}
+                disabled={isThinking || isTranscribing || voiceConfigLoading}
+              >
+                <Mic size={20} aria-hidden="true" />
+              </button>
+              <button
+                type="submit"
+                className="btn-send-message"
+                disabled={(!inputText.trim() && !attachedImage) || isThinking || isTranscribing}
+                title={t.send}
+                aria-label={t.send}
+              >
+                <Send size={18} aria-hidden="true" />
+              </button>
+            </form>
+          </>
+        )}
       </footer>
     </div>
   );

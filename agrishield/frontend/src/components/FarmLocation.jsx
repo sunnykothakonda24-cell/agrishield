@@ -18,7 +18,7 @@ import {
 
 const normalizePoints = (boundaryPoints = []) => boundaryPoints.map((point) => {
   if (Array.isArray(point)) return [Number(point[0]), Number(point[1])];
-  return [Number(point.lat), Number(point.lng)];
+  return [Number(point.lat ?? point.latitude), Number(point.lng ?? point.longitude)];
 }).filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
 
 const pointKey = (point) => {
@@ -26,17 +26,6 @@ const pointKey = (point) => {
   const lng = Number(point?.[1] ?? point?.lng ?? point?.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return `${lat.toFixed(6)},${lng.toFixed(6)}`;
-};
-
-const dedupePoints = (boundaryPoints = []) => {
-  const seen = new Set();
-  return boundaryPoints.reduce((accumulator, point) => {
-    const key = pointKey(point);
-    if (!key || seen.has(key)) return accumulator;
-    seen.add(key);
-    accumulator.push(Array.isArray(point) ? [Number(point[0]), Number(point[1])] : [Number(point.lat), Number(point.lng)]);
-    return accumulator;
-  }, []);
 };
 
 const hasCoordinates = (value) => value?.lat !== null && value?.lat !== undefined &&
@@ -115,7 +104,7 @@ export default function FarmLocation({
   const searchControllerRef = useRef(null);
   const searchSequenceRef = useRef(0);
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(location?.displayName || '');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -133,10 +122,7 @@ export default function FarmLocation({
   const satelliteTileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 
   const updateBoundaryPoints = (updatedPoints) => {
-    const dedupedPoints = dedupePoints(updatedPoints);
-    const sanitizedPoints = dedupedPoints
-      .map(([lat, lng]) => [Number(lat), Number(lng)])
-      .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+    const sanitizedPoints = normalizePoints(updatedPoints);
     pointsRef.current = sanitizedPoints;
     setPoints(sanitizedPoints);
     const updatedGeometry = calculateGeometry(sanitizedPoints);
@@ -202,6 +188,13 @@ export default function FarmLocation({
       });
       markersGroupRef.current.addLayer(marker);
     });
+
+    if (currentPoints.length > 0) {
+      const bounds = L.latLngBounds(currentPoints);
+      if (!map.getBounds().contains(bounds)) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+      }
+    }
   };
 
   const handleMapClick = (event) => {
@@ -222,8 +215,15 @@ export default function FarmLocation({
       zoom: 16,
       zoomControl: true
     });
+    const mapContainer = mapContainerRef.current;
+    const invalidateMapSize = () => map.invalidateSize({ pan: false, debounceMoveend: true });
+    const initialResizeFrame = window.requestAnimationFrame(invalidateMapSize);
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(invalidateMapSize);
+    resizeObserver?.observe(mapContainer);
     L.tileLayer(satelliteTileUrl, {
-      attribution: '&copy; Esri, Maxar, Earthstar Geographics | AgriShield-AI',
+      attribution: '&copy; Esri, Maxar, Earthstar Geographics | AgriShield',
       maxZoom: 19
     }).addTo(map);
     markersGroupRef.current = L.featureGroup().addTo(map);
@@ -245,7 +245,12 @@ export default function FarmLocation({
         return;
       }
       if (pointsRef.current.length > 0) updateBoundaryPoints([]);
-      setLocation({ lat: Number(position.lat.toFixed(6)), lng: Number(position.lng.toFixed(6)), source: 'manual' });
+      setLocation({
+        lat: Number(position.lat.toFixed(6)),
+        lng: Number(position.lng.toFixed(6)),
+        source: 'manual',
+        displayName: null
+      });
       setGeoError('');
     });
     map.on('click', (event) => mapClickHandlerRef.current?.(event));
@@ -254,6 +259,8 @@ export default function FarmLocation({
     renderBoundaryLayers(pointsRef.current);
 
     return () => {
+      window.cancelAnimationFrame(initialResizeFrame);
+      resizeObserver?.disconnect();
       map.remove();
       if (mapInstanceRef.current === map) mapInstanceRef.current = null;
       markersGroupRef.current = null;
@@ -275,8 +282,10 @@ export default function FarmLocation({
     const nextLatLng = [Number(location.lat), Number(location.lng)];
     if (markerRef.current) markerRef.current.setLatLng(nextLatLng);
     const wasSearchOrGpsSelection = location.source === 'search' || location.source === 'gps';
-    map.flyTo(nextLatLng, wasSearchOrGpsSelection ? 16 : map.getZoom(), { duration: 1.2 });
-  }, [location?.lat, location?.lng]);
+    if (pointsRef.current.length === 0) {
+      map.flyTo(nextLatLng, wasSearchOrGpsSelection ? 16 : map.getZoom(), { duration: 1.2 });
+    }
+  }, [location?.lat, location?.lng, location?.source]);
 
   useEffect(() => {
     renderBoundaryLayers(points);
@@ -288,6 +297,11 @@ export default function FarmLocation({
   }, []);
 
   const applyLocation = (lat, lng, source, displayName) => {
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 ||
+        !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      setGeoError('The selected location did not include valid coordinates.');
+      return false;
+    }
     const currentPoints = pointsRef.current;
     const changed = hasCoordinates(location) &&
       (Number(location.lat) !== lat || Number(location.lng) !== lng);
@@ -296,9 +310,9 @@ export default function FarmLocation({
       return false;
     }
     if (changed && currentPoints.length > 0) updateBoundaryPoints([]);
-    setLocation({ lat, lng, source });
+    setLocation({ lat, lng, source, displayName: displayName || null });
     setGeoError('');
-    if (displayName) setSearchQuery(displayName);
+    setSearchQuery(displayName || '');
     return true;
   };
 
@@ -306,6 +320,8 @@ export default function FarmLocation({
     const query = event.target.value;
     setSearchQuery(query);
     setSearchError('');
+    setSearchResults([]);
+    setShowResults(false);
     searchSequenceRef.current += 1;
     searchControllerRef.current?.abort();
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
@@ -453,7 +469,7 @@ export default function FarmLocation({
           {showResults && (searchResults.length > 0 || searchError) && (
             <div className="search-results-dropdown" role="listbox" aria-label="Location search results">
               {searchError && <div className="search-result-message" role="status">{searchError}</div>}
-              {searchResults.map((item, idx) => (
+              {searchResults.map((item) => (
                 <button 
                   type="button"
                   key={`${item.latitude}-${item.longitude}`}

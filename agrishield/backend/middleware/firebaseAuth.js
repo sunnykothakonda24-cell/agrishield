@@ -17,7 +17,17 @@ function getFailureStatus(error) {
   return typeof error.code === 'string' && error.code.startsWith('auth/') ? 401 : 503;
 }
 
+function logDevelopmentTtsTiming(req, stage, startedAt) {
+  if (process.env.NODE_ENV === 'development' && req.originalUrl?.startsWith('/api/ai/speak/stream')) {
+    console.debug('[AgriShield TTS Timing]', {
+      stage,
+      elapsedMs: Math.round(performance.now() - startedAt)
+    });
+  }
+}
+
 async function verifyFirebaseRequest(req) {
+  const startedAt = performance.now();
   const authorization = req.get('authorization') || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   logDevelopmentAuth('Firebase token received.', { received: Boolean(match) });
@@ -44,6 +54,7 @@ async function verifyFirebaseRequest(req) {
     error.statusCode = 401;
     throw error;
   }
+  logDevelopmentTtsTiming(req, 'firebase_identity_verified', startedAt);
   logDevelopmentAuth('Firebase token verified.', { uidPresent: true });
   return decodedToken;
 }
@@ -67,6 +78,76 @@ function requireFirebaseIdentity(req, res, next) {
     });
 }
 
+function requireActiveFarm(req, res, next) {
+  if (req.activeFarmVerified && req.farmData && req.activeFarmId) return next();
+  if (!firestoreRepository.isConfigured()) {
+    return res.status(503).json({
+      success: false,
+      code: 'APPLICATION_FIRESTORE_UNAVAILABLE',
+      message: 'Farm application data is temporarily unavailable. Your sign-in remains active; please retry.'
+    });
+  }
+  resolveActiveFarm({
+    uid: req.firebaseUid,
+    suppliedFarmId: req.params.farmId || req.get('x-farm-id')
+  })
+    .then(({ farmId, farm }) => {
+      req.activeFarmId = farmId;
+      req.farmId = farmId;
+      req.farmData = farm;
+      next();
+    })
+    .catch((error) => {
+      if ([400, 403, 409].includes(error.statusCode)) {
+        return res.status(error.statusCode).json({
+          success: false,
+          code: error.code,
+          message: error.message
+        });
+      }
+      console.error('[AgriShield Auth] Active farm resolution failed:', error.code || error.name || 'farm_resolution_error');
+      return res.status(getFailureStatus(error)).json({
+        success: false,
+        code: error.code || 'APPLICATION_FIRESTORE_UNAVAILABLE',
+        message: getFailureStatus(error) === 503
+          ? error.message
+          : 'Farm application data is temporarily unavailable. Your sign-in remains active; please retry.'
+      });
+    });
+}
+
+async function resolveActiveFarm({ uid, suppliedFarmId, repository = firestoreRepository }) {
+  const farm = await repository.getFarmForUser(uid);
+  if (!farm) {
+    if (suppliedFarmId && !await repository.getFarmOwnership(uid, suppliedFarmId)) {
+      const error = new Error('This farm is not available to your account.');
+      error.code = 'FARM_ACCESS_DENIED';
+      error.statusCode = 403;
+      throw error;
+    }
+    const error = new Error('Select one of your farms before requesting farm-specific data.');
+    error.code = 'ACTIVE_FARM_REQUIRED';
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const activeFarmId = String(farm._id || farm.farmId);
+  if (suppliedFarmId && String(suppliedFarmId) !== activeFarmId) {
+    if (!await repository.getFarmOwnership(uid, suppliedFarmId)) {
+      const error = new Error('This farm is not available to your account.');
+      error.code = 'FARM_ACCESS_DENIED';
+      error.statusCode = 403;
+      throw error;
+    }
+    const error = new Error('The requested farm is not the active farm for this account.');
+    error.code = 'ACTIVE_FARM_MISMATCH';
+    error.statusCode = 409;
+    throw error;
+  }
+
+  return { farmId: activeFarmId, farm };
+}
+
 function requireRecentFirebaseIdentity(req, res, next) {
   const authenticatedAt = Number(req.firebaseUser?.auth_time);
   const ageSeconds = Math.floor(Date.now() / 1000) - authenticatedAt;
@@ -74,7 +155,7 @@ function requireRecentFirebaseIdentity(req, res, next) {
     return res.status(401).json({
       success: false,
       code: 'RECENT_AUTH_REQUIRED',
-      message: 'Verify your phone again before deleting your account.'
+      message: 'Please sign in again before deleting your account.'
     });
   }
   return next();
@@ -85,15 +166,17 @@ function requireFirebaseFarmer(req, res, next) {
     .then(async (decodedToken) => {
       req.firebaseUser = decodedToken;
       req.firebaseUid = decodedToken.uid;
-      if (!firestoreRepository.isConfigured()) {
+      if (!firestoreRepository.isPrivateConfigured()) {
         return res.status(503).json({
           success: false,
-          code: 'FIRESTORE_UNAVAILABLE',
-          message: 'Some farm data could not be loaded because Firestore is unavailable. Check the backend Firebase configuration and retry.'
+          code: 'PRIVATE_FIRESTORE_UNAVAILABLE',
+          message: 'Your private account data could not be loaded. Check the backend Firebase configuration and retry.'
         });
       }
 
+      const profileReadStartedAt = performance.now();
       const farmer = await firestoreRepository.getUser(decodedToken.uid);
+      logDevelopmentTtsTiming(req, 'private_profile_loaded', profileReadStartedAt);
       if (!farmer) {
         return res.status(403).json({
           success: false,
@@ -102,6 +185,50 @@ function requireFirebaseFarmer(req, res, next) {
         });
       }
       req.farmerId = decodedToken.uid;
+
+      const suppliedFarmId = req.params.farmId || req.get('x-farm-id');
+      const activeFarmId = farmer.activeFarmId || null;
+      if (suppliedFarmId || activeFarmId) {
+        if (!firestoreRepository.isConfigured()) {
+          return res.status(503).json({
+            success: false,
+            code: 'APPLICATION_FIRESTORE_UNAVAILABLE',
+            message: 'Farm application data is temporarily unavailable. Your sign-in remains active; please retry.'
+          });
+        }
+        const farmReadStartedAt = performance.now();
+        const farm = await firestoreRepository.getFarmForUser(decodedToken.uid);
+        logDevelopmentTtsTiming(req, 'active_farm_loaded', farmReadStartedAt);
+        const resolvedFarmId = farm ? String(farm._id || farm.farmId) : null;
+        if (suppliedFarmId && String(suppliedFarmId) !== resolvedFarmId) {
+          const ownership = await firestoreRepository.getFarmOwnership(decodedToken.uid, suppliedFarmId);
+          if (!ownership) {
+            return res.status(403).json({
+              success: false,
+              code: 'FARM_ACCESS_DENIED',
+              message: 'This farm is not available to your account.'
+            });
+          }
+          if (!farm) {
+            return res.status(400).json({
+              success: false,
+              code: 'ACTIVE_FARM_REQUIRED',
+              message: 'Select one of your farms before requesting farm-specific data.'
+            });
+          }
+          return res.status(409).json({
+            success: false,
+            code: 'ACTIVE_FARM_MISMATCH',
+            message: 'The requested farm is not the active farm for this account.'
+          });
+        }
+        if (farm) {
+          req.activeFarmId = resolvedFarmId;
+          req.farmId = resolvedFarmId;
+          req.farmData = farm;
+          req.activeFarmVerified = true;
+        }
+      }
       return next();
     })
     .catch((error) => {
@@ -117,8 +244,10 @@ function requireFirebaseFarmer(req, res, next) {
 }
 
 module.exports = {
+  requireActiveFarm,
   requireFirebaseFarmer,
   requireFirebaseIdentity,
   requireRecentFirebaseIdentity,
+  resolveActiveFarm,
   verifyFirebaseRequest
 };

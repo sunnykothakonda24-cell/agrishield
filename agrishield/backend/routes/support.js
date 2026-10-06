@@ -26,9 +26,9 @@ const FAQS = [
   { id: 'voice-ai', category: 'AgriShield AI Support', question: 'How do I use voice AI?', answer: 'Open AI Chat, allow microphone access when prompted, record your question, and submit it. Voice processing requires the backend transcription provider to be configured.' },
   { id: 'telugu', category: 'AgriShield AI Support', question: 'Can I ask questions in Telugu?', answer: 'The AI chat supports Telugu text and voice flows when the configured AI and speech services are available.' },
   { id: 'hindi', category: 'AgriShield AI Support', question: 'Can I ask questions in Hindi?', answer: 'The AI chat supports Hindi text and voice flows when the configured AI and speech services are available.' },
-  { id: 'mobile-edit', category: 'Account Status', question: 'How do I edit my mobile number?', answer: 'Open your profile, choose the mobile-number edit option, and complete OTP verification for the new number.' },
+  { id: 'mobile-edit', category: 'Account Status', question: 'How do I edit my mobile number?', answer: 'Open your profile, enter or update your mobile number in the profile field, and save your profile changes.' },
   { id: 'report-issue', category: 'Contact Us', question: 'How do I report an issue?', answer: 'Open Contact Us, choose Report an Issue, describe what happened, select an issue type and priority, and submit the report.' },
-  { id: 'otp-security', category: 'Account Status', question: 'How is my account protected?', answer: 'Sign-in and mobile-number changes use phone OTP verification. Never share an OTP with anyone.' }
+  { id: 'account-security', category: 'Account Status', question: 'How is my account protected?', answer: "AgriShield uses secure Firebase email and password authentication. Your password is managed by Firebase Authentication and is not stored in AgriShield's application database." }
 ];
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -132,6 +132,7 @@ router.post('/ticket', requireFirebaseFarmer, upload.single('screenshot'), async
     }
 
     const ticketId = await firestoreRepository.createRecord('supportTickets', {
+      ownerUid: req.farmerId,
       farmerId: req.farmerId,
       issueType,
       description: description.trim(),
@@ -169,6 +170,7 @@ router.post('/feedback', requireFirebaseFarmer, express.json(), async (req, res)
       return res.status(400).json({ success: false, message: 'Rating must be between 1 and 5.' });
     }
     const feedbackId = await firestoreRepository.createRecord('supportFeedback', {
+      ownerUid: req.farmerId,
       farmerId: req.farmerId,
       rating: parsedRating,
       message: message.trim()
